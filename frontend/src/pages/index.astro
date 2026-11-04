@@ -1,0 +1,515 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Header from '../components/Header.astro';
+---
+
+<Layout title="Monitor UBA - Full-Stack Astro & LangGraph">
+  <Header />
+
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+    
+    <!-- SEARCH & CONTROLS -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+      <div class="absolute top-0 right-0 -mt-8 -mr-8 w-48 h-48 bg-blue-600/10 rounded-full blur-3xl pointer-events-none"></div>
+      
+      <div class="max-w-3xl space-y-4">
+        <h2 class="text-xl font-bold text-white flex items-center gap-2">
+          <span>✨</span>
+          Búsqueda y Clasificación de Noticias UBA
+        </h2>
+        <p class="text-sm text-slate-400">
+          Agentes autónomos de <strong>LangGraph</strong> rastrean la web con DuckDuckGo, realizan scraping profundo con <strong>Crawl4AI + Playwright</strong> y clasifican el sentimiento e impacto institucional con <strong>Google Gemini</strong>.
+        </p>
+
+        <form id="searchForm" class="grid grid-cols-1 md:grid-cols-12 gap-4 pt-2">
+          <div class="md:col-span-8">
+            <label class="block text-xs font-medium text-slate-300 mb-1">Consulta / Tema</label>
+            <div class="relative">
+              <input 
+                type="text" 
+                id="queryInput" 
+                value="UBA" 
+                placeholder="Ej: UBA, UBA presupuesto, Medicina UBA, etc." 
+                class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
+                required
+              />
+            </div>
+          </div>
+
+          <div class="md:col-span-4">
+            <label class="block text-xs font-medium text-slate-300 mb-1 flex justify-between">
+              <span>Límite de artículos</span>
+              <span id="limitVal" class="text-blue-400 font-semibold">5</span>
+            </label>
+            <input 
+              type="range" 
+              id="limitInput" 
+              min="2" 
+              max="10" 
+              value="5" 
+              class="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500 mt-3"
+            />
+          </div>
+
+          <div class="md:col-span-12 flex justify-end gap-3 pt-2">
+            <button 
+              type="submit" 
+              id="btnSubmit" 
+              class="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl text-sm transition-all shadow-lg shadow-blue-600/30 active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
+            >
+              <span>▶</span>
+              <span>Iniciar Análisis Multi-Agente</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- AGENT PIPELINE PROGRESS -->
+    <div id="pipelineTracker" class="hidden bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="text-sm font-semibold text-slate-300 flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping"></span>
+          <span>Flujo de Agentes en Ejecución</span>
+        </h3>
+        <span id="pipelineStatusText" class="text-xs text-cyan-400 font-mono">Iniciando...</span>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
+        <div id="step-searcher" class="p-3 rounded-xl border border-slate-800 bg-slate-950/60 flex items-center gap-3">
+          <div class="w-7 h-7 rounded-lg bg-slate-800 flex items-center justify-center text-slate-400 font-bold step-icon">1</div>
+          <div>
+            <p class="font-medium text-slate-300">Buscador</p>
+            <p class="text-[10px] text-slate-500 step-desc">Esperando</p>
+          </div>
+        </div>
+
+        <div id="step-crawler" class="p-3 rounded-xl border border-slate-800 bg-slate-950/60 flex items-center gap-3">
+          <div class="w-7 h-7 rounded-lg bg-slate-800 flex items-center justify-center text-slate-400 font-bold step-icon">2</div>
+          <div>
+            <p class="font-medium text-slate-300">Crawler</p>
+            <p class="text-[10px] text-slate-500 step-desc">Esperando</p>
+          </div>
+        </div>
+
+        <div id="step-classifier" class="p-3 rounded-xl border border-slate-800 bg-slate-950/60 flex items-center gap-3">
+          <div class="w-7 h-7 rounded-lg bg-slate-800 flex items-center justify-center text-slate-400 font-bold step-icon">3</div>
+          <div>
+            <p class="font-medium text-slate-300">Clasificador</p>
+            <p class="text-[10px] text-slate-500 step-desc">Esperando</p>
+          </div>
+        </div>
+
+        <div id="step-reporter" class="p-3 rounded-xl border border-slate-800 bg-slate-950/60 flex items-center gap-3">
+          <div class="w-7 h-7 rounded-lg bg-slate-800 flex items-center justify-center text-slate-400 font-bold step-icon">4</div>
+          <div>
+            <p class="font-medium text-slate-300">Reportero</p>
+            <p class="text-[10px] text-slate-500 step-desc">Esperando</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RESULTS DASHBOARD -->
+    <div id="resultsSection" class="hidden space-y-6">
+
+      <!-- STATS & CHARTS -->
+      <div class="grid grid-cols-1 md:grid-cols-12 gap-6">
+        
+        <!-- KPI CARDS (8 cols) -->
+        <div class="md:col-span-8 grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between">
+            <span class="text-xs text-slate-400 font-medium">Total Noticias</span>
+            <p id="statTotal" class="text-3xl font-extrabold text-white mt-2">0</p>
+            <span class="text-[10px] text-slate-500 mt-1">Artículos procesados</span>
+          </div>
+
+          <div class="bg-slate-900 border border-emerald-900/30 rounded-2xl p-4 flex flex-col justify-between">
+            <span class="text-xs text-emerald-400 font-medium flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-emerald-400"></span> Buenas
+            </span>
+            <p id="statBuenas" class="text-3xl font-extrabold text-emerald-400 mt-2">0</p>
+            <span id="statPctBuenas" class="text-[10px] text-emerald-500/80 mt-1">0% del total</span>
+          </div>
+
+          <div class="bg-slate-900 border border-rose-900/30 rounded-2xl p-4 flex flex-col justify-between">
+            <span class="text-xs text-rose-400 font-medium flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-rose-400"></span> Malas
+            </span>
+            <p id="statMalas" class="text-3xl font-extrabold text-rose-400 mt-2">0</p>
+            <span id="statPctMalas" class="text-[10px] text-rose-500/80 mt-1">0% del total</span>
+          </div>
+
+          <div class="bg-slate-900 border border-slate-700/50 rounded-2xl p-4 flex flex-col justify-between">
+            <span class="text-xs text-slate-300 font-medium flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-slate-400"></span> Neutras
+            </span>
+            <p id="statNeutras" class="text-3xl font-extrabold text-slate-200 mt-2">0</p>
+            <span id="statPctNeutras" class="text-[10px] text-slate-400 mt-1">0% del total</span>
+          </div>
+
+          <!-- SENTIMENT METER -->
+          <div class="col-span-2 sm:col-span-4 bg-slate-900 border border-slate-800 rounded-2xl p-4">
+            <div class="flex items-center justify-between text-xs mb-2">
+              <span class="text-slate-400 font-medium">Índice Promedio de Sentimiento</span>
+              <span id="statAvgScoreBadge" class="font-bold text-white px-2 py-0.5 rounded bg-slate-800">+0.00</span>
+            </div>
+            <div class="w-full bg-slate-950 h-3 rounded-full relative overflow-hidden flex">
+              <div id="sentimentMeter" class="h-full bg-blue-500 rounded-full transition-all duration-500" style="width: 50%;"></div>
+            </div>
+            <div class="flex justify-between text-[10px] text-slate-500 mt-1 font-mono">
+              <span>-1.0 (Muy negativo)</span>
+              <span>0.0 (Neutro)</span>
+              <span>+1.0 (Muy positivo)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- DONUT CHART (4 cols) -->
+        <div class="md:col-span-4 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center">
+          <span class="text-xs text-slate-400 font-medium mb-2">Distribución de Sentimiento</span>
+          <div class="w-40 h-40 relative">
+            <canvas id="sentimentChart"></canvas>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- FILTER TABS & EXPORTS -->
+      <div class="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-800">
+        <div class="flex items-center gap-2 p-1 bg-slate-900 border border-slate-800 rounded-xl text-xs w-full sm:w-auto">
+          <button class="filter-btn active px-3 py-1.5 rounded-lg font-medium text-white bg-blue-600 transition-colors" data-filter="ALL">
+            Todas (<span id="filterCountAll">0</span>)
+          </button>
+          <button class="filter-btn px-3 py-1.5 rounded-lg font-medium text-slate-400 hover:text-white transition-colors" data-filter="BUENA">
+            🟢 Buenas (<span id="filterCountBuenas">0</span>)
+          </button>
+          <button class="filter-btn px-3 py-1.5 rounded-lg font-medium text-slate-400 hover:text-white transition-colors" data-filter="MALA">
+            🔴 Malas (<span id="filterCountMalas">0</span>)
+          </button>
+          <button class="filter-btn px-3 py-1.5 rounded-lg font-medium text-slate-400 hover:text-white transition-colors" data-filter="NEUTRAL">
+            ⚪ Neutras (<span id="filterCountNeutras">0</span>)
+          </button>
+        </div>
+
+        <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
+          <button id="btnExportMd" class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-xs text-slate-300 transition-colors">
+            <span>📄</span>
+            <span>Exportar Markdown</span>
+          </button>
+          <button id="btnExportJson" class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-xs text-slate-300 transition-colors">
+            <span>💾</span>
+            <span>Exportar JSON</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- NEWS CARDS LIST -->
+      <div id="newsList" class="space-y-4">
+        <!-- Render dinámico -->
+      </div>
+
+    </div>
+
+  </main>
+
+  <footer class="border-t border-slate-900 bg-slate-950 py-6 text-center text-xs text-slate-600">
+    <p>Monitor UBA • Frontend Astro.js • Backend FastAPI • LangGraph • Crawl4AI • Google Gemini</p>
+  </footer>
+</Layout>
+
+<script is:inline>
+  const searchForm = document.getElementById("searchForm");
+  const queryInput = document.getElementById("queryInput");
+  const limitInput = document.getElementById("limitInput");
+  const limitVal = document.getElementById("limitVal");
+  const btnSubmit = document.getElementById("btnSubmit");
+  const llmStatusBadge = document.getElementById("llmStatusBadge");
+  
+  const pipelineTracker = document.getElementById("pipelineTracker");
+  const pipelineStatusText = document.getElementById("pipelineStatusText");
+  const resultsSection = document.getElementById("resultsSection");
+  const newsList = document.getElementById("newsList");
+
+  const statTotal = document.getElementById("statTotal");
+  const statBuenas = document.getElementById("statBuenas");
+  const statMalas = document.getElementById("statMalas");
+  const statNeutras = document.getElementById("statNeutras");
+  const statPctBuenas = document.getElementById("statPctBuenas");
+  const statPctMalas = document.getElementById("statPctMalas");
+  const statPctNeutras = document.getElementById("statPctNeutras");
+  const statAvgScoreBadge = document.getElementById("statAvgScoreBadge");
+  const sentimentMeter = document.getElementById("sentimentMeter");
+
+  const filterBtns = document.querySelectorAll(".filter-btn");
+  let currentFilter = "ALL";
+  let analyzedData = null;
+  let chartInstance = null;
+
+  limitInput.addEventListener("input", (e) => {
+    limitVal.textContent = e.target.value;
+  });
+
+  async function checkBackendConfig(retries = 8) {
+    try {
+      const res = await fetch("/api/config");
+      if (!res.ok) throw new Error("Backend no disponible");
+      const data = await res.json();
+      if (data.gemini_configured) {
+        llmStatusBadge.className = "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-emerald-950/60 border border-emerald-800 text-emerald-300";
+        llmStatusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400"></span><span>Google Gemini (${data.model})</span>`;
+      } else {
+        llmStatusBadge.className = "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-amber-950/60 border border-amber-800 text-amber-300";
+        llmStatusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-400"></span><span>Modo Heurístico (Sin API Key)</span>`;
+      }
+    } catch (err) {
+      if (retries > 0) {
+        llmStatusBadge.className = "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-blue-950/60 border border-blue-800 text-blue-300";
+        llmStatusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-blue-400 animate-ping"></span><span>Iniciando backend Python...</span>`;
+        setTimeout(() => checkBackendConfig(retries - 1), 1500);
+      } else {
+        llmStatusBadge.className = "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-rose-950/60 border border-rose-800 text-rose-300";
+        llmStatusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-rose-400"></span><span>Backend no responde (puerto 8000)</span>`;
+      }
+    }
+  }
+  checkBackendConfig();
+
+  function updatePipelineStep(stepId, state, descText) {
+    const el = document.getElementById(`step-${stepId}`);
+    if (!el) return;
+    const icon = el.querySelector(".step-icon");
+    const desc = el.querySelector(".step-desc");
+
+    if (state === "active") {
+      el.className = "p-3 rounded-xl border border-blue-500/50 bg-blue-950/30 flex items-center gap-3 animate-pulse";
+      icon.className = "w-7 h-7 rounded-lg bg-blue-600 text-white font-bold flex items-center justify-center step-icon";
+    } else if (state === "done") {
+      el.className = "p-3 rounded-xl border border-emerald-500/40 bg-emerald-950/20 flex items-center gap-3";
+      icon.className = "w-7 h-7 rounded-lg bg-emerald-600 text-white font-bold flex items-center justify-center step-icon";
+      icon.innerHTML = "✓";
+    }
+    if (descText) desc.textContent = descText;
+  }
+
+  function resetPipeline() {
+    ["searcher", "crawler", "classifier", "reporter"].forEach(s => {
+      const el = document.getElementById(`step-${s}`);
+      const icon = el.querySelector(".step-icon");
+      const desc = el.querySelector(".step-desc");
+      el.className = "p-3 rounded-xl border border-slate-800 bg-slate-950/60 flex items-center gap-3";
+      icon.className = "w-7 h-7 rounded-lg bg-slate-800 flex items-center justify-center text-slate-400 font-bold step-icon";
+      desc.textContent = "Esperando";
+    });
+  }
+
+  searchForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const query = queryInput.value.trim() || "UBA";
+    const maxResults = limitInput.value;
+
+    btnSubmit.disabled = true;
+    btnSubmit.classList.add("opacity-50");
+    pipelineTracker.classList.remove("hidden");
+    resultsSection.classList.add("hidden");
+    resetPipeline();
+
+    const eventSource = new EventSource(`/api/stream?query=${encodeURIComponent(query)}&max_results=${maxResults}`);
+
+    eventSource.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      const { step, message, payload } = data;
+
+      pipelineStatusText.textContent = message;
+
+      if (step === "searcher") {
+        updatePipelineStep("searcher", "active", "Buscando...");
+      } else if (step === "searcher_done") {
+        updatePipelineStep("searcher", "done", `${payload.count} encontradas`);
+      } else if (step === "crawler") {
+        updatePipelineStep("crawler", "active", "Extrayendo web...");
+      } else if (step === "crawler_done") {
+        updatePipelineStep("crawler", "done", "Completado");
+      } else if (step === "classifier") {
+        updatePipelineStep("classifier", "active", "Clasificando...");
+      } else if (step === "classifier_progress") {
+        updatePipelineStep("classifier", "active", `${payload.current}/${payload.total}`);
+      } else if (step === "completed") {
+        updatePipelineStep("classifier", "done", "Listo");
+        updatePipelineStep("reporter", "done", "Generado");
+        eventSource.close();
+        btnSubmit.disabled = false;
+        btnSubmit.classList.remove("opacity-50");
+
+        analyzedData = payload;
+        renderResults(payload);
+      } else if (step === "error") {
+        alert("Error: " + message);
+        eventSource.close();
+        btnSubmit.disabled = false;
+        btnSubmit.classList.remove("opacity-50");
+      }
+    };
+
+    eventSource.onerror = (err) => {
+      console.error("SSE Error:", err);
+      eventSource.close();
+      btnSubmit.disabled = false;
+      btnSubmit.classList.remove("opacity-50");
+    };
+  });
+
+  function renderResults(data) {
+    resultsSection.classList.remove("hidden");
+
+    statTotal.textContent = data.total;
+    statBuenas.textContent = data.stats.buenas;
+    statMalas.textContent = data.stats.malas;
+    statNeutras.textContent = data.stats.neutras;
+
+    statPctBuenas.textContent = `${data.stats.pct_buenas}% del total`;
+    statPctMalas.textContent = `${data.stats.pct_malas}% del total`;
+    statPctNeutras.textContent = `${data.stats.pct_neutras}% del total`;
+
+    const score = data.stats.avg_score;
+    statAvgScoreBadge.textContent = `${score >= 0 ? "+" : ""}${score.toFixed(2)}`;
+    
+    const meterPct = Math.min(Math.max(((score + 1) / 2) * 100, 5), 95);
+    sentimentMeter.style.width = `${meterPct}%`;
+    sentimentMeter.className = `h-full rounded-full transition-all duration-500 ${
+      score > 0.1 ? "bg-emerald-500" : (score < -0.1 ? "bg-rose-500" : "bg-slate-400")
+    }`;
+
+    document.getElementById("filterCountAll").textContent = data.total;
+    document.getElementById("filterCountBuenas").textContent = data.stats.buenas;
+    document.getElementById("filterCountMalas").textContent = data.stats.malas;
+    document.getElementById("filterCountNeutras").textContent = data.stats.neutras;
+
+    renderChart(data.stats.buenas, data.stats.malas, data.stats.neutras);
+    renderNewsCards(data.news);
+  }
+
+  function renderChart(buenas, malas, neutras) {
+    const ctx = document.getElementById("sentimentChart").getContext("2d");
+    if (chartInstance) chartInstance.destroy();
+
+    chartInstance = new Chart(ctx, {
+      type: "doughnut",
+      data: {
+        labels: ["Buenas", "Malas", "Neutras"],
+        datasets: [{
+          data: [buenas, malas, neutras],
+          backgroundColor: ["#10b981", "#f43f5e", "#64748b"],
+          borderWidth: 0,
+          hoverOffset: 4
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false }
+        },
+        cutout: "70%"
+      }
+    });
+  }
+
+  function renderNewsCards(news) {
+    newsList.innerHTML = "";
+
+    const filtered = currentFilter === "ALL" 
+      ? news 
+      : news.filter(n => n.classification.sentiment === currentFilter);
+
+    if (filtered.length === 0) {
+      newsList.innerHTML = `<div class="p-8 text-center bg-slate-900 border border-slate-800 rounded-2xl text-slate-400 text-sm">No hay noticias en esta categoría.</div>`;
+      return;
+    }
+
+    filtered.forEach((item) => {
+      const c = item.classification;
+      const isBuena = c.sentiment === "BUENA";
+      const isMala = c.sentiment === "MALA";
+
+      const badgeBg = isBuena ? "bg-emerald-950/80 border-emerald-800 text-emerald-400" : (isMala ? "bg-rose-950/80 border-rose-800 text-rose-400" : "bg-slate-800 border-slate-700 text-slate-300");
+      const scoreBadge = isBuena ? "bg-emerald-900/50 text-emerald-300" : (isMala ? "bg-rose-900/50 text-rose-300" : "bg-slate-700 text-slate-300");
+      const badgeText = isBuena ? "🟢 BUENA" : (isMala ? "🔴 MALA" : "⚪ NEUTRA");
+
+      const card = document.createElement("div");
+      card.className = "bg-slate-900 border border-slate-800 hover:border-slate-700 transition-all rounded-2xl p-5 space-y-3";
+      card.innerHTML = `
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <span class="px-2.5 py-1 rounded-lg border text-xs font-bold ${badgeBg}">${badgeText}</span>
+            <span class="px-2 py-0.5 rounded text-xs font-mono font-bold ${scoreBadge}">${c.score >= 0 ? "+" : ""}${c.score.toFixed(2)}</span>
+            <span class="text-xs px-2.5 py-0.5 rounded bg-slate-800 text-slate-400 font-medium">${c.category || "General"}</span>
+          </div>
+          ${item.source ? `<span class="text-xs text-slate-500 font-medium">${item.source}</span>` : ""}
+        </div>
+
+        <h3 class="text-base font-bold text-white leading-snug">
+          <a href="${item.url}" target="_blank" rel="noopener noreferrer" class="hover:text-blue-400 transition-colors inline-flex items-center gap-1.5">
+            <span>${item.title || "Sin título"}</span>
+            <span class="text-xs opacity-60">↗</span>
+          </a>
+        </h3>
+
+        <div class="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3.5 space-y-2">
+          <p class="text-xs text-slate-300 leading-relaxed">
+            <strong class="text-slate-200">Justificación:</strong> ${c.justification}
+          </p>
+          ${c.key_points && c.key_points.length > 0 ? `
+            <ul class="text-[11px] text-slate-400 space-y-1 pl-4 list-disc marker:text-slate-600">
+              ${c.key_points.map(kp => `<li>${kp}</li>`).join("")}
+            </ul>
+          ` : ""}
+        </div>
+
+        <div class="flex items-center justify-between pt-1">
+          <span class="text-[11px] text-slate-500 truncate max-w-xs sm:max-w-md">${item.url}</span>
+          <a href="${item.url}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">
+            <span>Leer nota completa</span>
+            <span class="text-xs">→</span>
+          </a>
+        </div>
+      `;
+      newsList.appendChild(card);
+    });
+  }
+
+  filterBtns.forEach(btn => {
+    btn.addEventListener("click", () => {
+      filterBtns.forEach(b => {
+        b.classList.remove("active", "bg-blue-600", "text-white");
+        b.classList.add("text-slate-400");
+      });
+      btn.classList.add("active", "bg-blue-600", "text-white");
+      btn.classList.remove("text-slate-400");
+
+      currentFilter = btn.getAttribute("data-filter");
+      if (analyzedData) renderNewsCards(analyzedData.news);
+    });
+  });
+
+  document.getElementById("btnExportMd").addEventListener("click", () => {
+    if (!analyzedData || !analyzedData.summary_report) return;
+    const blob = new Blob([analyzedData.summary_report], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `reporte_uba_${Date.now()}.md`;
+    a.click();
+  });
+
+  document.getElementById("btnExportJson").addEventListener("click", () => {
+    if (!analyzedData || !analyzedData.news) return;
+    const blob = new Blob([JSON.stringify(analyzedData, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `datos_uba_${Date.now()}.json`;
+    a.click();
+  });
+</script>
+
