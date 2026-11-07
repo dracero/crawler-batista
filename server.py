@@ -1,4 +1,4 @@
-"""Servidor FastAPI Full-Stack para el Monitor de Noticias UBA."""
+"""Servidor FastAPI Full-Stack para el Monitor de Noticias y Redes Sociales UBA."""
 
 import os
 import json
@@ -18,8 +18,8 @@ from src.state import GraphState
 
 app = FastAPI(
     title="Monitor UBA Full-Stack",
-    description="Aplicación web para monitorear y clasificar noticias de la UBA usando LangGraph, Crawl4AI y Gemini",
-    version="1.0.0"
+    description="Aplicación web para monitorear y clasificar noticias y redes sociales de la UBA usando LangGraph, Crawl4AI y Gemini",
+    version="1.1.0"
 )
 
 # CORS para desarrollo
@@ -33,17 +33,19 @@ app.add_middleware(
 
 class AnalyzeRequest(BaseModel):
     query: str = Field(default="UBA", description="Tema o términos de búsqueda")
-    max_results: int = Field(default=5, ge=1, le=15, description="Cantidad de noticias a analizar")
+    max_results: int = Field(default=6, ge=1, le=15, description="Cantidad de noticias/temas a analizar")
 
 @app.get("/api/config")
 async def get_config():
-    """Devuelve el estado de la configuración de LLM."""
+    """Devuelve el estado de la configuración de LLM y de los conectores MCP de Redes Sociales."""
+    from src.mcp_social import get_mcp_social_status
     gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
     return {
         "gemini_configured": bool(gemini_key),
         "model": model,
-        "default_query": "UBA"
+        "default_query": "UBA",
+        "mcp_social": get_mcp_social_status()
     }
 
 @app.post("/api/analyze")
@@ -61,12 +63,13 @@ async def analyze_news(request: AnalyzeRequest):
             "errors": []
         }
 
-        # Ejecutar en threadpool para no bloquear el bucle de eventos
         final_state = await asyncio.to_thread(graph.invoke, initial_state)
 
-        # Calcular métricas resumen
         news = final_state.get("classified_news", [])
         total = len(news)
+        total_mentions = sum(n.get("occurrences", 1) for n in news)
+        social_count = sum(1 for n in news if n.get("source_type") == "red_social")
+        media_count = total - social_count
         buenas = sum(1 for n in news if n["classification"]["sentiment"] == "BUENA")
         malas = sum(1 for n in news if n["classification"]["sentiment"] == "MALA")
         neutras = sum(1 for n in news if n["classification"]["sentiment"] == "NEUTRAL")
@@ -79,6 +82,9 @@ async def analyze_news(request: AnalyzeRequest):
                 "buenas": buenas,
                 "malas": malas,
                 "neutras": neutras,
+                "total_mentions": total_mentions,
+                "social_count": social_count,
+                "media_count": media_count,
                 "pct_buenas": round((buenas / total * 100), 1) if total > 0 else 0,
                 "pct_malas": round((malas / total * 100), 1) if total > 0 else 0,
                 "pct_neutras": round((neutras / total * 100), 1) if total > 0 else 0,
@@ -100,51 +106,71 @@ async def event_generator(query: str, max_results: int) -> AsyncGenerator[str, N
         yield send_event("start", "Iniciando flujo multi-agente...")
         await asyncio.sleep(0.2)
 
-        # Paso 1: Búsqueda
-        yield send_event("searcher", f"Agente Buscador: Localizando noticias recientes sobre '{query}'...")
+        # Paso 1: Búsqueda en Medios y Redes Sociales + Conteo de Apariciones
+        yield send_event("searcher", f"Agente Buscador: Rastreando medios y redes sociales sobre '{query}' y contabilizando apariciones...")
         from src.agents.searcher import search_uba_news
         search_results = await asyncio.to_thread(search_uba_news, query=query, max_results=max_results)
-        yield send_event("searcher_done", f"Búsqueda finalizada: {len(search_results)} artículos encontrados.", {
-            "count": len(search_results),
-            "titles": [r.title for r in search_results]
-        })
+        total_found_mentions = sum(r.occurrences for r in search_results)
+        yield send_event(
+            "searcher_done",
+            f"Búsqueda finalizada: {len(search_results)} temas ({total_found_mentions} apariciones en medios y redes).",
+            {
+                "count": len(search_results),
+                "total_mentions": total_found_mentions,
+                "titles": [r.title for r in search_results]
+            }
+        )
         await asyncio.sleep(0.3)
 
         # Paso 2: Crawler
-        yield send_event("crawler", f"Agente Crawler: Extrayendo contenido web con Crawl4AI y Playwright...")
+        yield send_event("crawler", "Agente Crawler: Extrayendo contenido web y redes sociales con Crawl4AI + Playwright...")
         from src.agents.crawler import crawl_articles_async
         urls = [r.url for r in search_results if r.url]
         crawled_articles = await crawl_articles_async(urls)
         success_count = sum(1 for c in crawled_articles if c.success)
-        yield send_event("crawler_done", f"Crawling completado: {success_count}/{len(urls)} páginas extraídas con éxito.")
+        yield send_event("crawler_done", f"Crawling completado: {success_count}/{len(urls)} páginas extraídas.")
         await asyncio.sleep(0.3)
 
         # Paso 3: Clasificador
         yield send_event("classifier", "Agente Clasificador: Evaluando impacto y sentimiento con Google Gemini...")
-        from src.agents.classifier import classify_article
+        from src.agents.classifier import classify_article, build_combined_content
         analyzed_list = []
         search_meta = {r.url: r for r in search_results}
 
         for idx, article in enumerate(crawled_articles, 1):
             url = article.url
             meta = search_meta.get(url)
-            title = article.title or (meta.title if meta else "Noticia UBA")
-            content = article.content_markdown or (meta.snippet if meta else "")
+            title = (meta.title if meta and meta.title else article.title) or "Noticia UBA"
             source = meta.source if meta else "Medio Web"
+            source_type = meta.source_type if meta else "medio"
             date = meta.date if meta else None
+            occurrences = meta.occurrences if meta else 1
+            sources = (meta.sources if meta and meta.sources else [source])
+            mentions = [m.model_dump() for m in meta.mentions] if meta and meta.mentions else []
+
+            content = build_combined_content(meta.model_dump() if meta else {}, article.content_markdown)
 
             classification = await asyncio.to_thread(
-                classify_article, title=title, content=content, source=source
+                classify_article,
+                title=title,
+                content=content,
+                source=source,
+                occurrences=occurrences,
+                sources=sources
             )
             analyzed_item = {
                 "url": url,
                 "title": title,
                 "source": source,
+                "source_type": source_type,
                 "date": date,
+                "occurrences": occurrences,
+                "sources": sources,
+                "mentions": mentions,
                 "classification": classification.model_dump()
             }
             analyzed_list.append(analyzed_item)
-            yield send_event("classifier_progress", f"Clasificado {idx}/{len(crawled_articles)}: {classification.sentiment}", {
+            yield send_event("classifier_progress", f"Clasificado {idx}/{len(crawled_articles)}: {classification.sentiment} ({occurrences}x)", {
                 "current": idx,
                 "total": len(crawled_articles),
                 "last_item": analyzed_item
@@ -155,6 +181,9 @@ async def event_generator(query: str, max_results: int) -> AsyncGenerator[str, N
         report_md = generate_text_report(analyzed_list, query)
 
         total = len(analyzed_list)
+        total_mentions = sum(n.get("occurrences", 1) for n in analyzed_list)
+        social_count = sum(1 for n in analyzed_list if n.get("source_type") == "red_social")
+        media_count = total - social_count
         buenas = sum(1 for n in analyzed_list if n["classification"]["sentiment"] == "BUENA")
         malas = sum(1 for n in analyzed_list if n["classification"]["sentiment"] == "MALA")
         neutras = sum(1 for n in analyzed_list if n["classification"]["sentiment"] == "NEUTRAL")
@@ -164,6 +193,9 @@ async def event_generator(query: str, max_results: int) -> AsyncGenerator[str, N
             "buenas": buenas,
             "malas": malas,
             "neutras": neutras,
+            "total_mentions": total_mentions,
+            "social_count": social_count,
+            "media_count": media_count,
             "pct_buenas": round((buenas / total * 100), 1) if total > 0 else 0,
             "pct_malas": round((malas / total * 100), 1) if total > 0 else 0,
             "pct_neutras": round((neutras / total * 100), 1) if total > 0 else 0,
@@ -182,7 +214,7 @@ async def event_generator(query: str, max_results: int) -> AsyncGenerator[str, N
         yield send_event("error", f"Error en la ejecución: {str(e)}")
 
 @app.get("/api/stream")
-async def stream_analysis(query: str = "UBA", max_results: int = 5):
+async def stream_analysis(query: str = "UBA", max_results: int = 6):
     """Endpoint SSE para transmitir en tiempo real cada paso del análisis."""
     return StreamingResponse(
         event_generator(query=query, max_results=max_results),

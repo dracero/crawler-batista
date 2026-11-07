@@ -3,7 +3,7 @@ import Layout from '../layouts/Layout.astro';
 import Header from '../components/Header.astro';
 ---
 
-<Layout title="Monitor UBA - Full-Stack Astro & LangGraph">
+<Layout title="Monitor UBA - Medios y Redes Sociales (Astro & LangGraph)">
   <Header />
 
   <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
@@ -13,12 +13,18 @@ import Header from '../components/Header.astro';
       <div class="absolute top-0 right-0 -mt-8 -mr-8 w-48 h-48 bg-blue-600/10 rounded-full blur-3xl pointer-events-none"></div>
       
       <div class="max-w-3xl space-y-4">
-        <h2 class="text-xl font-bold text-white flex items-center gap-2">
-          <span>✨</span>
-          Búsqueda y Clasificación de Noticias UBA
-        </h2>
+        <div class="flex flex-wrap items-center gap-2">
+          <h2 class="text-xl font-bold text-white flex items-center gap-2">
+            <span>✨</span>
+            Búsqueda, Conteo de Apariciones y Redes Sociales UBA
+          </h2>
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-fuchsia-950/60 border border-fuchsia-800/70 text-fuchsia-300">
+            <span>🔌 MCP Redes:</span>
+            <span>𝕏 X · 📸 Instagram · 📘 Facebook</span>
+          </span>
+        </div>
         <p class="text-sm text-slate-400">
-          Agentes autónomos de <strong>LangGraph</strong> rastrean la web con DuckDuckGo, realizan scraping profundo con <strong>Crawl4AI + Playwright</strong> y clasifican el sentimiento e impacto institucional con <strong>Google Gemini</strong>.
+          Agentes autónomos de <strong>LangGraph</strong> rastrean <strong>medios nacionales</strong> y conectores <strong>MCP de Redes Sociales</strong> (X, Instagram, Facebook), extraen las <strong>fechas de publicación</strong>, contabilizan cuántas veces apareció cada noticia junto a todas sus fuentes y clasifican el impacto con <strong>Google Gemini</strong>.
         </p>
 
         <form id="searchForm" class="grid grid-cols-1 md:grid-cols-12 gap-4 pt-2">
@@ -38,15 +44,15 @@ import Header from '../components/Header.astro';
 
           <div class="md:col-span-4">
             <label class="block text-xs font-medium text-slate-300 mb-1 flex justify-between">
-              <span>Límite de artículos</span>
-              <span id="limitVal" class="text-blue-400 font-semibold">5</span>
+              <span>Límite de temas a analizar</span>
+              <span id="limitVal" class="text-blue-400 font-semibold">6</span>
             </label>
             <input 
               type="range" 
               id="limitInput" 
-              min="2" 
-              max="10" 
-              value="5" 
+              min="3" 
+              max="12" 
+              value="6" 
               class="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500 mt-3"
             />
           </div>
@@ -79,7 +85,7 @@ import Header from '../components/Header.astro';
         <div id="step-searcher" class="p-3 rounded-xl border border-slate-800 bg-slate-950/60 flex items-center gap-3">
           <div class="w-7 h-7 rounded-lg bg-slate-800 flex items-center justify-center text-slate-400 font-bold step-icon">1</div>
           <div>
-            <p class="font-medium text-slate-300">Buscador</p>
+            <p class="font-medium text-slate-300">Buscador + Conteo</p>
             <p class="text-[10px] text-slate-500 step-desc">Esperando</p>
           </div>
         </div>
@@ -119,9 +125,12 @@ import Header from '../components/Header.astro';
         <!-- KPI CARDS (8 cols) -->
         <div class="md:col-span-8 grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between">
-            <span class="text-xs text-slate-400 font-medium">Total Noticias</span>
-            <p id="statTotal" class="text-3xl font-extrabold text-white mt-2">0</p>
-            <span class="text-[10px] text-slate-500 mt-1">Artículos procesados</span>
+            <span class="text-xs text-slate-400 font-medium">Temas / Apariciones</span>
+            <div class="flex items-baseline gap-2 mt-2">
+              <p id="statTotal" class="text-3xl font-extrabold text-white">0</p>
+              <span id="statTotalMentions" class="text-xs font-bold text-amber-400 bg-amber-950/60 border border-amber-800/60 px-2 py-0.5 rounded-full">🔁 0x</span>
+            </div>
+            <span id="statSourceBreakdown" class="text-[10px] text-slate-400 mt-1">📰 0 medios · 📱 0 redes</span>
           </div>
 
           <div class="bg-slate-900 border border-emerald-900/30 rounded-2xl p-4 flex flex-col justify-between">
@@ -176,8 +185,8 @@ import Header from '../components/Header.astro';
       </div>
 
       <!-- FILTER TABS & EXPORTS -->
-      <div class="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-800">
-        <div class="flex items-center gap-2 p-1 bg-slate-900 border border-slate-800 rounded-xl text-xs w-full sm:w-auto">
+      <div class="flex flex-col lg:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-800">
+        <div class="flex flex-wrap items-center gap-1.5 p-1 bg-slate-900 border border-slate-800 rounded-xl text-xs w-full lg:w-auto">
           <button class="filter-btn active px-3 py-1.5 rounded-lg font-medium text-white bg-blue-600 transition-colors" data-filter="ALL">
             Todas (<span id="filterCountAll">0</span>)
           </button>
@@ -190,9 +199,15 @@ import Header from '../components/Header.astro';
           <button class="filter-btn px-3 py-1.5 rounded-lg font-medium text-slate-400 hover:text-white transition-colors" data-filter="NEUTRAL">
             ⚪ Neutras (<span id="filterCountNeutras">0</span>)
           </button>
+          <button class="filter-btn px-3 py-1.5 rounded-lg font-medium text-slate-400 hover:text-white transition-colors" data-filter="RED_SOCIAL">
+            📱 Redes Sociales (<span id="filterCountSocial">0</span>)
+          </button>
+          <button class="filter-btn px-3 py-1.5 rounded-lg font-medium text-slate-400 hover:text-white transition-colors" data-filter="REPEATED">
+            🔁 Repetidas (<span id="filterCountRepeated">0</span>)
+          </button>
         </div>
 
-        <div class="flex items-center gap-2 w-full sm:w-auto justify-end">
+        <div class="flex items-center gap-2 w-full lg:w-auto justify-end">
           <button id="btnExportMd" class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-xs text-slate-300 transition-colors">
             <span>📄</span>
             <span>Exportar Markdown</span>
@@ -214,7 +229,7 @@ import Header from '../components/Header.astro';
   </main>
 
   <footer class="border-t border-slate-900 bg-slate-950 py-6 text-center text-xs text-slate-600">
-    <p>Monitor UBA • Frontend Astro.js • Backend FastAPI • LangGraph • Crawl4AI • Google Gemini</p>
+    <p>Monitor UBA • Medios + Redes Sociales • Conteo de Apariciones • Astro.js • FastAPI • LangGraph • Crawl4AI • Google Gemini</p>
   </footer>
 </Layout>
 
@@ -232,6 +247,8 @@ import Header from '../components/Header.astro';
   const newsList = document.getElementById("newsList");
 
   const statTotal = document.getElementById("statTotal");
+  const statTotalMentions = document.getElementById("statTotalMentions");
+  const statSourceBreakdown = document.getElementById("statSourceBreakdown");
   const statBuenas = document.getElementById("statBuenas");
   const statMalas = document.getElementById("statMalas");
   const statNeutras = document.getElementById("statNeutras");
@@ -293,12 +310,13 @@ import Header from '../components/Header.astro';
   }
 
   function resetPipeline() {
-    ["searcher", "crawler", "classifier", "reporter"].forEach(s => {
+    ["searcher", "crawler", "classifier", "reporter"].forEach((s, idx) => {
       const el = document.getElementById(`step-${s}`);
       const icon = el.querySelector(".step-icon");
       const desc = el.querySelector(".step-desc");
       el.className = "p-3 rounded-xl border border-slate-800 bg-slate-950/60 flex items-center gap-3";
       icon.className = "w-7 h-7 rounded-lg bg-slate-800 flex items-center justify-center text-slate-400 font-bold step-icon";
+      icon.textContent = String(idx + 1);
       desc.textContent = "Esperando";
     });
   }
@@ -323,9 +341,10 @@ import Header from '../components/Header.astro';
       pipelineStatusText.textContent = message;
 
       if (step === "searcher") {
-        updatePipelineStep("searcher", "active", "Buscando...");
+        updatePipelineStep("searcher", "active", "Medios y redes...");
       } else if (step === "searcher_done") {
-        updatePipelineStep("searcher", "done", `${payload.count} encontradas`);
+        const totalM = payload.total_mentions || payload.count;
+        updatePipelineStep("searcher", "done", `${payload.count} temas (${totalM}x)`);
       } else if (step === "crawler") {
         updatePipelineStep("crawler", "active", "Extrayendo web...");
       } else if (step === "crawler_done") {
@@ -362,7 +381,15 @@ import Header from '../components/Header.astro';
   function renderResults(data) {
     resultsSection.classList.remove("hidden");
 
+    const totalMentions = data.stats.total_mentions || data.news.reduce((acc, n) => acc + (n.occurrences || 1), 0);
+    const socialCount = data.stats.social_count ?? data.news.filter(n => n.source_type === "red_social").length;
+    const mediaCount = data.stats.media_count ?? (data.total - socialCount);
+    const repeatedCount = data.news.filter(n => (n.occurrences || 1) > 1).length;
+
     statTotal.textContent = data.total;
+    statTotalMentions.textContent = `🔁 ${totalMentions} apariciones`;
+    statSourceBreakdown.textContent = `📰 ${mediaCount} medios · 📱 ${socialCount} redes`;
+
     statBuenas.textContent = data.stats.buenas;
     statMalas.textContent = data.stats.malas;
     statNeutras.textContent = data.stats.neutras;
@@ -384,6 +411,8 @@ import Header from '../components/Header.astro';
     document.getElementById("filterCountBuenas").textContent = data.stats.buenas;
     document.getElementById("filterCountMalas").textContent = data.stats.malas;
     document.getElementById("filterCountNeutras").textContent = data.stats.neutras;
+    document.getElementById("filterCountSocial").textContent = socialCount;
+    document.getElementById("filterCountRepeated").textContent = repeatedCount;
 
     renderChart(data.stats.buenas, data.stats.malas, data.stats.neutras);
     renderNewsCards(data.news);
@@ -415,15 +444,33 @@ import Header from '../components/Header.astro';
     });
   }
 
+  function getSourceIcon(sourceName, sourceType) {
+    const s = (sourceName || "").toLowerCase();
+    if (s.includes("x (") || s.includes("twitter") || s.startsWith("x ")) return "𝕏";
+    if (s.includes("instagram")) return "📸";
+    if (s.includes("tiktok")) return "🎵";
+    if (s.includes("youtube")) return "▶️";
+    if (s.includes("reddit")) return "👽";
+    if (s.includes("facebook")) return "📘";
+    if (s.includes("linkedin")) return "💼";
+    if (sourceType === "red_social" || s.includes("redes")) return "📱";
+    return "📰";
+  }
+
   function renderNewsCards(news) {
     newsList.innerHTML = "";
 
-    const filtered = currentFilter === "ALL" 
-      ? news 
-      : news.filter(n => n.classification.sentiment === currentFilter);
+    let filtered = news;
+    if (currentFilter === "BUENA" || currentFilter === "MALA" || currentFilter === "NEUTRAL") {
+      filtered = news.filter(n => n.classification.sentiment === currentFilter);
+    } else if (currentFilter === "RED_SOCIAL") {
+      filtered = news.filter(n => n.source_type === "red_social" || (n.mentions || []).some(m => m.source_type === "red_social"));
+    } else if (currentFilter === "REPEATED") {
+      filtered = news.filter(n => (n.occurrences || 1) > 1);
+    }
 
     if (filtered.length === 0) {
-      newsList.innerHTML = `<div class="p-8 text-center bg-slate-900 border border-slate-800 rounded-2xl text-slate-400 text-sm">No hay noticias en esta categoría.</div>`;
+      newsList.innerHTML = `<div class="p-8 text-center bg-slate-900 border border-slate-800 rounded-2xl text-slate-400 text-sm">No hay noticias ni publicaciones en este filtro.</div>`;
       return;
     }
 
@@ -431,21 +478,67 @@ import Header from '../components/Header.astro';
       const c = item.classification;
       const isBuena = c.sentiment === "BUENA";
       const isMala = c.sentiment === "MALA";
+      const occurrences = item.occurrences || 1;
+      const sourcesList = item.sources && item.sources.length > 0 ? item.sources : (item.source ? [item.source] : ["Web"]);
+      const mentionsList = item.mentions || [];
+      const isSocial = item.source_type === "red_social";
 
       const badgeBg = isBuena ? "bg-emerald-950/80 border-emerald-800 text-emerald-400" : (isMala ? "bg-rose-950/80 border-rose-800 text-rose-400" : "bg-slate-800 border-slate-700 text-slate-300");
       const scoreBadge = isBuena ? "bg-emerald-900/50 text-emerald-300" : (isMala ? "bg-rose-900/50 text-rose-300" : "bg-slate-700 text-slate-300");
       const badgeText = isBuena ? "🟢 BUENA" : (isMala ? "🔴 MALA" : "⚪ NEUTRA");
 
+      const occBadgeClass = occurrences > 1
+        ? "bg-amber-950/80 border-amber-700/80 text-amber-300 font-bold"
+        : "bg-slate-800/80 border-slate-700 text-slate-400 font-medium";
+      const occText = occurrences > 1
+        ? `🔁 Apareció ${occurrences} veces`
+        : `1 aparición`;
+
+      const typeBadge = isSocial
+        ? `<span class="px-2.5 py-0.5 rounded-lg border border-fuchsia-800/70 bg-fuchsia-950/60 text-fuchsia-300 text-xs font-semibold flex items-center gap-1">${getSourceIcon(item.source, "red_social")} Red Social</span>`
+        : `<span class="px-2.5 py-0.5 rounded-lg border border-cyan-900/70 bg-cyan-950/50 text-cyan-300 text-xs font-medium flex items-center gap-1">📰 Medio</span>`;
+
+      const sourcesBadgesHtml = sourcesList.map(src => {
+        const icon = getSourceIcon(src, isSocial ? "red_social" : "medio");
+        return `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800/90 border border-slate-700 text-xs text-slate-200 font-medium">${icon} ${src}</span>`;
+      }).join("");
+
+      const mentionsHtml = mentionsList.length > 1 ? `
+        <details class="bg-slate-950/60 border border-slate-800/80 rounded-xl p-3 text-xs">
+          <summary class="cursor-pointer font-semibold text-amber-300 hover:text-amber-200 select-none flex items-center justify-between">
+            <span>📋 Ver las ${mentionsList.length} apariciones detectadas, fechas y fuentes</span>
+            <span class="text-[11px] text-slate-400">${sourcesList.length} ${sourcesList.length === 1 ? 'fuente' : 'fuentes distintas'}</span>
+          </summary>
+          <div class="mt-3 space-y-2 pt-2 border-t border-slate-800/80">
+            ${mentionsList.map((m, idx) => `
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] py-1 border-b border-slate-900 last:border-0">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="text-slate-500 font-mono">#${idx + 1}</span>
+                  <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-mono shrink-0">📅 ${m.date || item.date || "Reciente"}</span>
+                  <span class="px-2 py-0.5 rounded bg-slate-800 text-cyan-300 font-semibold shrink-0">${getSourceIcon(m.source, m.source_type)} ${m.source}</span>
+                  <span class="text-slate-300 truncate">${m.title || item.title}</span>
+                </div>
+                <a href="${m.url}" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:text-blue-300 shrink-0 font-medium">Abrir ↗</a>
+              </div>
+            `).join("")}
+          </div>
+        </details>
+      ` : "";
+
+      const dateBadgeHtml = `<span class="px-2.5 py-0.5 rounded-lg border border-slate-700 bg-slate-800/90 text-slate-200 text-xs font-mono flex items-center gap-1">📅 ${item.date || "Reciente"}</span>`;
+
       const card = document.createElement("div");
-      card.className = "bg-slate-900 border border-slate-800 hover:border-slate-700 transition-all rounded-2xl p-5 space-y-3";
+      card.className = "bg-slate-900 border border-slate-800 hover:border-slate-700 transition-all rounded-2xl p-5 space-y-3.5";
       card.innerHTML = `
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center gap-2">
             <span class="px-2.5 py-1 rounded-lg border text-xs font-bold ${badgeBg}">${badgeText}</span>
             <span class="px-2 py-0.5 rounded text-xs font-mono font-bold ${scoreBadge}">${c.score >= 0 ? "+" : ""}${c.score.toFixed(2)}</span>
+            ${typeBadge}
+            <span class="px-2.5 py-0.5 rounded-lg border text-xs ${occBadgeClass}">${occText}</span>
             <span class="text-xs px-2.5 py-0.5 rounded bg-slate-800 text-slate-400 font-medium">${c.category || "General"}</span>
           </div>
-          ${item.source ? `<span class="text-xs text-slate-500 font-medium">${item.source}</span>` : ""}
+          ${dateBadgeHtml}
         </div>
 
         <h3 class="text-base font-bold text-white leading-snug">
@@ -454,6 +547,16 @@ import Header from '../components/Header.astro';
             <span class="text-xs opacity-60">↗</span>
           </a>
         </h3>
+
+        <!-- FUENTES DETECTADAS -->
+        <div class="space-y-1.5">
+          <span class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+            Fuentes donde apareció (${sourcesList.length}):
+          </span>
+          <div class="flex flex-wrap gap-1.5">
+            ${sourcesBadgesHtml}
+          </div>
+        </div>
 
         <div class="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3.5 space-y-2">
           <p class="text-xs text-slate-300 leading-relaxed">
@@ -466,10 +569,12 @@ import Header from '../components/Header.astro';
           ` : ""}
         </div>
 
+        ${mentionsHtml}
+
         <div class="flex items-center justify-between pt-1">
           <span class="text-[11px] text-slate-500 truncate max-w-xs sm:max-w-md">${item.url}</span>
           <a href="${item.url}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">
-            <span>Leer nota completa</span>
+            <span>Abrir publicación original</span>
             <span class="text-xs">→</span>
           </a>
         </div>
@@ -512,4 +617,3 @@ import Header from '../components/Header.astro';
     a.click();
   });
 </script>
-

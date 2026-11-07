@@ -1,12 +1,23 @@
 from typing import List, Optional, Literal, TypedDict
 from pydantic import BaseModel, Field
 
+class MentionItem(BaseModel):
+    title: str = Field(description="Título en esta fuente")
+    url: str = Field(description="URL de la mención o artículo")
+    source: str = Field(description="Nombre del medio o red social")
+    source_type: Literal["medio", "red_social"] = Field(default="medio", description="Tipo de fuente")
+    date: Optional[str] = Field(default=None, description="Fecha de publicación si está disponible")
+
 class SearchResult(BaseModel):
     title: str = Field(description="Título del resultado de búsqueda")
-    url: str = Field(description="URL de la noticia")
-    snippet: str = Field(default="", description="Fragmento o bajada de la noticia")
+    url: str = Field(description="URL de la noticia o publicación")
+    snippet: str = Field(default="", description="Fragmento o bajada de la noticia o posteo")
     date: Optional[str] = Field(default=None, description="Fecha de publicación si está disponible")
-    source: Optional[str] = Field(default=None, description="Medio o fuente de noticias")
+    source: Optional[str] = Field(default=None, description="Medio o red social principal")
+    source_type: Literal["medio", "red_social"] = Field(default="medio", description="Indica si proviene de un medio tradicional o red social")
+    occurrences: int = Field(default=1, description="Cantidad de veces que apareció esta noticia/tema")
+    sources: List[str] = Field(default_factory=list, description="Lista de todas las fuentes/medios/redes donde apareció")
+    mentions: List[MentionItem] = Field(default_factory=list, description="Detalle de todas las apariciones agrupadas")
 
 class CrawledArticle(BaseModel):
     url: str
@@ -23,7 +34,7 @@ class NewsClassification(BaseModel):
         description="Puntuación numérica de sentimiento entre -1.0 (muy mala/negativa) y +1.0 (muy buena/positiva)"
     )
     category: str = Field(
-        description="Categoría principal (ej: Presupuesto y Finanzas, Logros Académicos y Científicos, Gremial y Paros, Infraestructura, Vida Universitaria)"
+        description="Categoría principal (ej: Presupuesto y Finanzas, Logros Académicos y Científicos, Gremial y Paros, Infraestructura, Vida Universitaria, Redes Sociales y Opinión)"
     )
     key_points: List[str] = Field(
         default_factory=list,
@@ -37,7 +48,11 @@ class AnalyzedNews(BaseModel):
     url: str
     title: str
     source: Optional[str] = None
+    source_type: Literal["medio", "red_social"] = "medio"
     date: Optional[str] = None
+    occurrences: int = 1
+    sources: List[str] = Field(default_factory=list)
+    mentions: List[MentionItem] = Field(default_factory=list)
     classification: NewsClassification
 
 class GraphState(TypedDict):
@@ -48,4 +63,3 @@ class GraphState(TypedDict):
     classified_news: List[dict]
     summary_report: str
     errors: List[str]
-

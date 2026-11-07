@@ -1,4 +1,4 @@
-"""Agente Reportero: Consolida los resultados, calcula estadísticas y genera el informe final."""
+"""Agente Reportero: Consolida los resultados, contabiliza apariciones, fechas y fuentes (medios + MCP redes sociales) y genera el informe final."""
 
 import logging
 from typing import Dict, Any, List
@@ -11,10 +11,14 @@ from src.state import GraphState
 logger = logging.getLogger(__name__)
 
 def generate_text_report(classified_news: List[Dict[str, Any]], query: str) -> str:
-    """Genera un informe detallado en formato Markdown."""
+    """Genera un informe detallado en formato Markdown con fechas, conteo de apariciones y fuentes."""
     total = len(classified_news)
     if total == 0:
         return f"# Reporte de Noticias UBA\nNo se encontraron noticias para la consulta: '{query}'."
+
+    total_mentions = sum(n.get("occurrences", 1) for n in classified_news)
+    social_count = sum(1 for n in classified_news if n.get("source_type") == "red_social")
+    media_count = total - social_count
 
     buenas = [n for n in classified_news if n["classification"]["sentiment"] == "BUENA"]
     malas = [n for n in classified_news if n["classification"]["sentiment"] == "MALA"]
@@ -27,37 +31,53 @@ def generate_text_report(classified_news: List[Dict[str, Any]], query: str) -> s
     avg_score = sum(n["classification"]["score"] for n in classified_news) / total
 
     lines = [
-        f"# 📊 Monitoreo de Noticias UBA",
-        f"**Búsqueda:** {query} | **Total analizadas:** {total}\n",
+        f"# 📊 Monitoreo de Noticias y Redes Sociales UBA",
+        f"**Búsqueda:** {query} | **Temas/Noticias analizadas:** {total} | **Total de apariciones detectadas:** {total_mentions}\n",
         f"## Resumen Ejecutivo",
         f"- 🟢 **Noticias Buenas (Positivas):** {len(buenas)} ({pct_buenas:.1f}%)",
         f"- 🔴 **Noticias Malas (Negativas):** {len(malas)} ({pct_malas:.1f}%)",
         f"- ⚪ **Noticias Neutrales:** {len(neutras)} ({pct_neutras:.1f}%)",
+        f"- 🔁 **Apariciones Totales Contabilizadas:** {total_mentions} menciones en medios y redes",
+        f"- 📰 **Medios Periodísticos:** {media_count} | 📱 **Redes Sociales (X, Instagram, Facebook):** {social_count}",
         f"- 📈 **Índice de Sentimiento Promedio:** `{avg_score:+.2f}` (de -1.0 a +1.0)\n",
         f"---",
-        f"## Detalle de Artículos Analizados\n"
+        f"## Detalle de Noticias y Publicaciones Analizadas\n"
     ]
 
     for idx, item in enumerate(classified_news, start=1):
         c = item["classification"]
         badge = "🟢 BUENA" if c["sentiment"] == "BUENA" else ("🔴 MALA" if c["sentiment"] == "MALA" else "⚪ NEUTRAL")
-        
+        occ = item.get("occurrences", 1)
+        date_str = item.get("date") or "Sin fecha"
+        sources_list = item.get("sources") or ([item.get("source")] if item.get("source") else ["Desconocido"])
+        src_type_badge = "📱 Red Social" if item.get("source_type") == "red_social" else "📰 Medio"
+
         lines.append(f"### {idx}. {item.get('title', 'Sin título')}")
+        lines.append(f"- **Fecha:** 📅 `{date_str}` | **Origen:** {src_type_badge}")
         lines.append(f"- **Veredicto:** {badge} (Score: `{c['score']:+.2f}`) | **Categoría:** {c['category']}")
-        if item.get("source"):
-            lines.append(f"- **Fuente:** {item['source']}")
-        lines.append(f"- **Enlace:** [{item.get('url')}]({item.get('url')})")
+        lines.append(f"- **Cantidad de apariciones:** 🔁 **{occ}** {'vez' if occ == 1 else 'veces'}")
+        lines.append(f"- **Fuentes ({len(sources_list)}):** {', '.join(sources_list)}")
+        lines.append(f"- **Enlace principal:** [{item.get('url')}]({item.get('url')})")
         lines.append(f"- **Justificación:** {c['justification']}")
         if c.get("key_points"):
             lines.append("- **Puntos destacados:**")
             for kp in c["key_points"]:
                 lines.append(f"  - {kp}")
+        mentions = item.get("mentions") or []
+        if len(mentions) > 1:
+            lines.append(f"- **Detalle de las {len(mentions)} apariciones registradas:**")
+            for m in mentions:
+                m_src = m.get("source", "Fuente")
+                m_date = m.get("date") or date_str
+                m_title = m.get("title", "")
+                m_url = m.get("url", "")
+                lines.append(f"  - **[{m_date}] {m_src}**: [{m_title}]({m_url})")
         lines.append("")
 
     return "\n".join(lines)
 
 def print_rich_dashboard(classified_news: List[Dict[str, Any]], query: str):
-    """Muestra una vista interactiva y visual en la terminal con Rich."""
+    """Muestra una vista interactiva y visual en la terminal con Rich incluyendo fecha, apariciones y fuentes."""
     console = Console()
     total = len(classified_news)
 
@@ -65,28 +85,37 @@ def print_rich_dashboard(classified_news: List[Dict[str, Any]], query: str):
         console.print(Panel(f"[yellow]No se encontraron noticias para: {query}[/yellow]", title="Sin resultados"))
         return
 
+    total_mentions = sum(n.get("occurrences", 1) for n in classified_news)
+    social_count = sum(1 for n in classified_news if n.get("source_type") == "red_social")
     buenas = sum(1 for n in classified_news if n["classification"]["sentiment"] == "BUENA")
     malas = sum(1 for n in classified_news if n["classification"]["sentiment"] == "MALA")
     neutras = sum(1 for n in classified_news if n["classification"]["sentiment"] == "NEUTRAL")
 
     header_text = Text()
-    header_text.append(f"Noticias analizadas: {total} | ", style="bold cyan")
+    header_text.append(f"Noticias: {total} (🔁 {total_mentions} apariciones) | ", style="bold cyan")
+    header_text.append(f"📱 Redes (X/IG/FB): {social_count} | ", style="bold magenta")
     header_text.append(f"Buenas: {buenas} ({(buenas/total)*100:.0f}%) ", style="bold green")
     header_text.append(f"| Malas: {malas} ({(malas/total)*100:.0f}%) ", style="bold red")
     header_text.append(f"| Neutras: {neutras} ({(neutras/total)*100:.0f}%)", style="bold white")
 
-    console.print(Panel(header_text, title="🎓 Monitor Inteligente UBA - LangGraph + Crawl4AI + Gemini", expand=False))
+    console.print(Panel(header_text, title="🎓 Monitor Inteligente UBA - Medios + MCP Redes Sociales", expand=False))
 
     table = Table(show_header=True, header_style="bold magenta")
     table.add_column("Sentimiento", width=12, justify="center")
-    table.add_column("Score", width=8, justify="right")
-    table.add_column("Categoría", width=22)
+    table.add_column("Score", width=7, justify="right")
+    table.add_column("Fecha", width=16, justify="center")
+    table.add_column("Apariciones", width=11, justify="center")
+    table.add_column("Fuentes", width=24)
     table.add_column("Título y Resumen", justify="left")
 
     for item in classified_news:
         c = item["classification"]
         sent = c["sentiment"]
         score_val = c["score"]
+        occ = item.get("occurrences", 1)
+        date_str = item.get("date") or "Hoy"
+        sources_list = item.get("sources") or ([item.get("source")] if item.get("source") else ["Web"])
+        is_social = item.get("source_type") == "red_social"
 
         if sent == "BUENA":
             sentiment_styled = "[bold green]🟢 BUENA[/bold green]"
@@ -98,8 +127,17 @@ def print_rich_dashboard(classified_news: List[Dict[str, Any]], query: str):
             sentiment_styled = "[bold white]⚪ NEUTRA[/bold white]"
             score_styled = f"[white]{score_val:+.2f}[/white]"
 
-        details = f"[bold]{item.get('title', 'Sin título')}[/bold]\n[dim]{c.get('justification', '')}[/dim]\n[blue underline]{item.get('url')}[/blue underline]"
-        table.add_row(sentiment_styled, score_styled, c.get("category", "General"), details)
+        occ_styled = f"[bold yellow]🔁 {occ}x[/bold yellow]" if occ > 1 else f"[dim]1x[/dim]"
+        prefix_icon = "📱 " if is_social else "📰 "
+        sources_styled = f"{prefix_icon}" + ", ".join(sources_list)
+        date_styled = f"[cyan]📅 {date_str}[/cyan]"
+
+        details = (
+            f"[bold]{item.get('title', 'Sin título')}[/bold] [cyan]({c.get('category', 'General')})[/cyan]\n"
+            f"[dim]{c.get('justification', '')}[/dim]\n"
+            f"[blue underline]{item.get('url')}[/blue underline]"
+        )
+        table.add_row(sentiment_styled, score_styled, date_styled, occ_styled, sources_styled, details)
 
     console.print(table)
 
@@ -110,7 +148,6 @@ def reporter_node(state: GraphState) -> Dict[str, Any]:
 
     report_markdown = generate_text_report(classified, query)
 
-    # Imprimir resumen estilizado en consola si estamos ejecutando en vivo
     try:
         print_rich_dashboard(classified, query)
     except Exception as e:
@@ -119,4 +156,3 @@ def reporter_node(state: GraphState) -> Dict[str, Any]:
     return {
         "summary_report": report_markdown
     }
-

@@ -1,0 +1,21 @@
+[project]
+name = "uba-news-monitor"
+version = "0.1.0"
+description = "Monitor de Noticias UBA con LangGraph, Crawl4AI, Playwright, Google Gemini y Astro.js"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "crawl4ai>=0.4.0",
+    "ddgs>=9.0.0",
+    "duckduckgo-search>=7.0.0",
+    "fastapi>=0.110.0",
+    "langchain-google-genai>=2.0.0",
+    "langgraph>=0.2.0",
+    "nltk>=3.8.0",
+    "playwright>=1.40.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.0.0",
+    "uvicorn>=0.28.0",
+]
+

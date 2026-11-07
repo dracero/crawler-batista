@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "description": "Monitor de Noticias UBA con LangGraph, Crawl4AI, Playwright, Google Gemini y Astro.js",
   "scripts": {
-    "dev:backend": ".venv/bin/uvicorn server:app --host 0.0.0.0 --port 8000 --reload",
+    "dev:backend": "uv run uvicorn server:app --host 0.0.0.0 --port 8000 --reload",
     "dev:frontend": "npm --prefix frontend run dev",
-    "dev": "concurrently -k -n \"BACKEND,FRONTEND\" -c \"cyan,magenta\" \".venv/bin/uvicorn server:app --host 0.0.0.0 --port 8000 --reload\" \"npm --prefix frontend run dev\"",
+    "dev": "concurrently -k -n \"BACKEND,FRONTEND\" -c \"cyan,magenta\" \"uv run uvicorn server:app --host 0.0.0.0 --port 8000 --reload\" \"npm --prefix frontend run dev\"",
     "build": "npm --prefix frontend run build",
-    "start": ".venv/bin/uvicorn server:app --host 0.0.0.0 --port 8000"
+    "start": "uv run uvicorn server:app --host 0.0.0.0 --port 8000"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
