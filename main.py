@@ -26,7 +26,7 @@ logging.getLogger("crawl4ai").setLevel(logging.WARNING)
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Monitor Inteligente de Noticias UBA (LangGraph + Crawl4AI + Gemini)"
+        description="Monitor de Noticias y Redes Sociales UBA (LangGraph + Crawl4AI + Gemini)"
     )
     parser.add_argument(
         "--query",
@@ -60,16 +60,18 @@ def main():
     console.print(f"[bold]Consulta:[/bold] {args.query}")
     console.print(f"[bold]Límite de artículos:[/bold] {args.max_results}")
     
-    gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not gemini_key:
+    from src.key_manager import get_gemini_keys
+    gemini_keys = get_gemini_keys()
+    if not gemini_keys:
         console.print(
             "[yellow]⚠️  Aviso: GEMINI_API_KEY no detectada en .env o variables de entorno.\n"
             "   Se utilizará el clasificador heurístico de respaldo.\n"
-            "   Para usar Google Gemini, añade tu clave en el archivo .env (ver .env.example).[/yellow]\n"
+            "   Para usar Google Gemini, añade tu(s) clave(s) en el archivo .env (ver .env.example).[/yellow]\n"
         )
     else:
         model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
-        console.print(f"[green]✓ Google Gemini configurado con modelo: {model}[/green]\n")
+        keys_note = f" ({len(gemini_keys)} API keys en rotación)" if len(gemini_keys) > 1 else ""
+        console.print(f"[green]✓ Google Gemini configurado con modelo: {model}{keys_note}[/green]\n")
 
     app = build_graph()
 
@@ -80,7 +82,6 @@ def main():
         "crawled_articles": [],
         "classified_news": [],
         "summary_report": "",
-        "errors": []
     }
 
     try:

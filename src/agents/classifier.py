@@ -2,10 +2,14 @@
 
 import os
 import logging
-from typing import List, Dict, Any, Optional
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from typing import List, Dict, Any, Optional, Tuple
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from src.state import GraphState, NewsClassification, AnalyzedNews
+from src.key_manager import get_key_rotator, mask_key
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +41,8 @@ Contenido / Fragmentos recopilados:
 """)
 ])
 
-# Modelos Gemini disponibles
-FALLBACK_MODELS = [
-    "gemini-3.6-flash",
-    "gemini-3.7-flash",
-    "gemini-3.8-flash"
-]
+# Modelo Gemini fijado exclusivamente en versión 3.6
+DEFAULT_MODEL = "gemini-3.6-flash"
 
 def rule_based_fallback_classifier(title: str, content: str) -> NewsClassification:
     """Clasificador heurístico de respaldo cuando la API no está disponible."""
@@ -79,6 +79,37 @@ def rule_based_fallback_classifier(title: str, content: str) -> NewsClassificati
             justification="Clasificación heurística de respaldo: no se detectó un sesgo marcadamente positivo ni negativo."
         )
 
+def _is_quota_error(err_msg: str) -> bool:
+    lowered = err_msg.lower()
+    return any(tok in lowered for tok in ("429", "resource_exhausted", "quota", "rate limit", "too many requests"))
+
+
+def _is_auth_error(err_msg: str) -> bool:
+    lowered = err_msg.lower()
+    return any(tok in lowered for tok in ("401", "403", "api_key_invalid", "api key not valid", "invalid api key", "permission_denied"))
+
+
+_client_lock = threading.Lock()
+_chain_cache: Dict[Tuple[str, str], Any] = {}
+
+
+def _get_or_create_chain(model_name: str, api_key: str) -> Any:
+    cache_key = (model_name, api_key)
+    with _client_lock:
+        chain = _chain_cache.get(cache_key)
+        if chain is None:
+            llm = ChatGoogleGenerativeAI(
+                model=model_name,
+                google_api_key=api_key,
+                temperature=0.1,
+                max_retries=0,
+                timeout=20,
+            )
+            chain = CLASSIFIER_PROMPT | llm.with_structured_output(NewsClassification)
+            _chain_cache[cache_key] = chain
+        return chain
+
+
 def classify_article(
     title: str,
     content: str,
@@ -86,29 +117,23 @@ def classify_article(
     occurrences: int = 1,
     sources: Optional[List[str]] = None
 ) -> NewsClassification:
-    """Clasifica una noticia o posteo utilizando Gemini con failover automático ante 503."""
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not api_key:
+    """Clasifica una noticia o posteo utilizando Gemini 3.6 rotando API keys y con circuit breaker."""
+    rotator = get_key_rotator()
+    ordered_keys = rotator.next_ordered_keys()
+    if not ordered_keys:
         return rule_based_fallback_classifier(title, content)
 
-    configured_model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash").strip()
-    models_to_try = [configured_model] + [m for m in FALLBACK_MODELS if m != configured_model]
+    model_name = os.getenv("GEMINI_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+    if "3.6" not in model_name:
+        logger.warning(f"El modelo '{model_name}' no es versión 3.6. Utilizando '{DEFAULT_MODEL}'.")
+        model_name = DEFAULT_MODEL
 
     trimmed_content = content[:6000] if content else "(Sin contenido adicional)"
     sources_str = ", ".join(sources) if sources else (source or "Desconocido")
 
-    for model_name in models_to_try:
+    for key_idx, api_key in ordered_keys:
         try:
-            llm = ChatGoogleGenerativeAI(
-                model=model_name,
-                google_api_key=api_key,
-                temperature=0.1,
-                max_retries=0,
-                timeout=20
-            )
-            structured_llm = llm.with_structured_output(NewsClassification)
-            chain = CLASSIFIER_PROMPT | structured_llm
-
+            chain = _get_or_create_chain(model_name, api_key)
             result: NewsClassification = chain.invoke({
                 "title": title or "Sin título",
                 "source": source or "Desconocido",
@@ -116,21 +141,21 @@ def classify_article(
                 "sources_str": sources_str,
                 "content": trimmed_content
             })
+            rotator.report_success(api_key)
             return result
 
         except Exception as e:
             err_msg = str(e)
-            if "503" in err_msg or "high demand" in err_msg.lower() or "UNAVAILABLE" in err_msg:
-                logger.warning(f"Modelo '{model_name}' con alta demanda temporal (503). Probando modelo alternativo...")
+            if _is_auth_error(err_msg):
+                rotator.report_invalid(api_key)
                 continue
-            elif "404" in err_msg or "not found" in err_msg.lower():
-                logger.warning(f"Modelo '{model_name}' no disponible (404). Conmutando al siguiente modelo...")
+            if _is_quota_error(err_msg):
+                rotator.report_rate_limit(api_key)
                 continue
-            else:
-                logger.warning(f"Error con modelo '{model_name}' ({err_msg}). Intentando alternativa...")
-                continue
+            logger.warning(f"Error con Gemini 3.6 y key #{key_idx} ({mask_key(api_key)}): {err_msg}. Rotando clave...")
+            continue
 
-    logger.warning("No se pudo clasificar mediante la API de Gemini tras intentar con todos los modelos. Utilizando clasificador de respaldo.")
+    logger.warning("No se pudo clasificar mediante Gemini 3.6 tras rotar todas las claves disponibles. Utilizando clasificador heurístico de respaldo.")
     return rule_based_fallback_classifier(title, content)
 
 def build_combined_content(meta: Dict[str, Any], crawled_markdown: str) -> str:
@@ -150,49 +175,58 @@ def build_combined_content(meta: Dict[str, Any], crawled_markdown: str) -> str:
 
     return "\n\n".join(parts)
 
+def _classify_single_crawled(article: Dict[str, Any], search_results: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """Combina metadatos y Markdown de un artículo y ejecuta la clasificación."""
+    url = article["url"]
+    meta = search_results.get(url, {})
+    # Priorizar el titular limpio obtenido en la búsqueda por sobre títulos genéricos de login/redirección
+    title = meta.get("title") or article.get("title") or "Noticia UBA"
+    source = meta.get("source", "Medio Web")
+    source_type = meta.get("source_type", "medio")
+    date = meta.get("date")
+    occurrences = meta.get("occurrences", 1)
+    sources = meta.get("sources") or ([source] if source else [])
+    mentions = meta.get("mentions") or []
+
+    content = build_combined_content(meta, article.get("content_markdown", ""))
+
+    classification = classify_article(
+        title=title,
+        content=content,
+        source=source,
+        occurrences=occurrences,
+        sources=sources,
+    )
+
+    analyzed_item = AnalyzedNews(
+        url=url,
+        title=title,
+        source=source,
+        source_type=source_type,
+        date=date,
+        occurrences=occurrences,
+        sources=sources,
+        mentions=mentions,
+        classification=classification,
+    )
+    return analyzed_item.model_dump()
+
+
 def classifier_node(state: GraphState) -> Dict[str, Any]:
-    """Nodo del Grafo para el Agente Clasificador."""
+    """Nodo del Grafo para el Agente Clasificador con concurrencia acotada."""
     search_results = {r["url"]: r for r in state.get("search_results", [])}
     crawled_articles = state.get("crawled_articles", [])
-    analyzed_list: List[Dict[str, Any]] = []
 
     logger.info(f"Agente Clasificador evaluando {len(crawled_articles)} noticias y publicaciones...")
+    if not crawled_articles:
+        return {"classified_news": []}
 
-    for article in crawled_articles:
-        url = article["url"]
-        meta = search_results.get(url, {})
-        # Priorizar el titular limpio obtenido en la búsqueda por sobre títulos genéricos de login/redirección
-        title = meta.get("title") or article.get("title") or "Noticia UBA"
-        source = meta.get("source", "Medio Web")
-        source_type = meta.get("source_type", "medio")
-        date = meta.get("date")
-        occurrences = meta.get("occurrences", 1)
-        sources = meta.get("sources") or ([source] if source else [])
-        mentions = meta.get("mentions") or []
+    active_keys = get_key_rotator().get_status().get("active_keys", 0)
+    workers = min(4, max(1, active_keys))
+    if workers == 1 or len(crawled_articles) == 1:
+        analyzed_list = [_classify_single_crawled(article, search_results) for article in crawled_articles]
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            analyzed_list = list(executor.map(lambda a: _classify_single_crawled(a, search_results), crawled_articles))
 
-        content = build_combined_content(meta, article.get("content_markdown", ""))
-
-        classification = classify_article(
-            title=title,
-            content=content,
-            source=source,
-            occurrences=occurrences,
-            sources=sources
-        )
-
-        analyzed_item = AnalyzedNews(
-            url=url,
-            title=title,
-            source=source,
-            source_type=source_type,
-            date=date,
-            occurrences=occurrences,
-            sources=sources,
-            mentions=mentions,
-            classification=classification
-        )
-        analyzed_list.append(analyzed_item.model_dump())
-
-    return {
-        "classified_news": analyzed_list
-    }
+    return {"classified_news": analyzed_list}

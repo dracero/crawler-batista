@@ -10,36 +10,49 @@ from src.state import GraphState
 
 logger = logging.getLogger(__name__)
 
+def compute_stats(classified_news: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Calcula estadísticas agregadas y porcentajes de sentimiento para un lote analizado."""
+    total = len(classified_news)
+    total_mentions = sum(n.get("occurrences", 1) for n in classified_news)
+    social_count = sum(1 for n in classified_news if n.get("source_type") == "red_social")
+    media_count = total - social_count
+
+    buenas = sum(1 for n in classified_news if n["classification"]["sentiment"] == "BUENA")
+    malas = sum(1 for n in classified_news if n["classification"]["sentiment"] == "MALA")
+    neutras = sum(1 for n in classified_news if n["classification"]["sentiment"] == "NEUTRAL")
+    avg_score = (sum(n["classification"]["score"] for n in classified_news) / total) if total > 0 else 0.0
+
+    return {
+        "buenas": buenas,
+        "malas": malas,
+        "neutras": neutras,
+        "total_mentions": total_mentions,
+        "social_count": social_count,
+        "media_count": media_count,
+        "pct_buenas": round((buenas / total * 100), 1) if total > 0 else 0.0,
+        "pct_malas": round((malas / total * 100), 1) if total > 0 else 0.0,
+        "pct_neutras": round((neutras / total * 100), 1) if total > 0 else 0.0,
+        "avg_score": round(avg_score, 2),
+    }
+
+
 def generate_text_report(classified_news: List[Dict[str, Any]], query: str) -> str:
     """Genera un informe detallado en formato Markdown con fechas, conteo de apariciones y fuentes."""
     total = len(classified_news)
     if total == 0:
         return f"# Reporte de Noticias UBA\nNo se encontraron noticias para la consulta: '{query}'."
 
-    total_mentions = sum(n.get("occurrences", 1) for n in classified_news)
-    social_count = sum(1 for n in classified_news if n.get("source_type") == "red_social")
-    media_count = total - social_count
-
-    buenas = [n for n in classified_news if n["classification"]["sentiment"] == "BUENA"]
-    malas = [n for n in classified_news if n["classification"]["sentiment"] == "MALA"]
-    neutras = [n for n in classified_news if n["classification"]["sentiment"] == "NEUTRAL"]
-
-    pct_buenas = (len(buenas) / total) * 100
-    pct_malas = (len(malas) / total) * 100
-    pct_neutras = (len(neutras) / total) * 100
-
-    avg_score = sum(n["classification"]["score"] for n in classified_news) / total
-
+    stats = compute_stats(classified_news)
     lines = [
         f"# 📊 Monitoreo de Noticias y Redes Sociales UBA",
-        f"**Búsqueda:** {query} | **Temas/Noticias analizadas:** {total} | **Total de apariciones detectadas:** {total_mentions}\n",
+        f"**Búsqueda:** {query} | **Temas/Noticias analizadas:** {total} | **Total de apariciones detectadas:** {stats['total_mentions']}\n",
         f"## Resumen Ejecutivo",
-        f"- 🟢 **Noticias Buenas (Positivas):** {len(buenas)} ({pct_buenas:.1f}%)",
-        f"- 🔴 **Noticias Malas (Negativas):** {len(malas)} ({pct_malas:.1f}%)",
-        f"- ⚪ **Noticias Neutrales:** {len(neutras)} ({pct_neutras:.1f}%)",
-        f"- 🔁 **Apariciones Totales Contabilizadas:** {total_mentions} menciones en medios y redes",
-        f"- 📰 **Medios Periodísticos:** {media_count} | 📱 **Redes Sociales (X, Instagram, Facebook):** {social_count}",
-        f"- 📈 **Índice de Sentimiento Promedio:** `{avg_score:+.2f}` (de -1.0 a +1.0)\n",
+        f"- 🟢 **Noticias Buenas (Positivas):** {stats['buenas']} ({stats['pct_buenas']:.1f}%)",
+        f"- 🔴 **Noticias Malas (Negativas):** {stats['malas']} ({stats['pct_malas']:.1f}%)",
+        f"- ⚪ **Noticias Neutrales:** {stats['neutras']} ({stats['pct_neutras']:.1f}%)",
+        f"- 🔁 **Apariciones Totales Contabilizadas:** {stats['total_mentions']} menciones en medios y redes",
+        f"- 📰 **Medios Periodísticos:** {stats['media_count']} | 📱 **Redes Sociales (X, Instagram, Facebook):** {stats['social_count']}",
+        f"- 📈 **Índice de Sentimiento Promedio:** `{stats['avg_score']:+.2f}` (de -1.0 a +1.0)\n",
         f"---",
         f"## Detalle de Noticias y Publicaciones Analizadas\n"
     ]
@@ -85,20 +98,21 @@ def print_rich_dashboard(classified_news: List[Dict[str, Any]], query: str):
         console.print(Panel(f"[yellow]No se encontraron noticias para: {query}[/yellow]", title="Sin resultados"))
         return
 
-    total_mentions = sum(n.get("occurrences", 1) for n in classified_news)
-    social_count = sum(1 for n in classified_news if n.get("source_type") == "red_social")
-    buenas = sum(1 for n in classified_news if n["classification"]["sentiment"] == "BUENA")
-    malas = sum(1 for n in classified_news if n["classification"]["sentiment"] == "MALA")
-    neutras = sum(1 for n in classified_news if n["classification"]["sentiment"] == "NEUTRAL")
+    stats = compute_stats(classified_news)
+    total_mentions = stats["total_mentions"]
+    social_count = stats["social_count"]
+    buenas = stats["buenas"]
+    malas = stats["malas"]
+    neutras = stats["neutras"]
 
     header_text = Text()
     header_text.append(f"Noticias: {total} (🔁 {total_mentions} apariciones) | ", style="bold cyan")
     header_text.append(f"📱 Redes (X/IG/FB): {social_count} | ", style="bold magenta")
-    header_text.append(f"Buenas: {buenas} ({(buenas/total)*100:.0f}%) ", style="bold green")
-    header_text.append(f"| Malas: {malas} ({(malas/total)*100:.0f}%) ", style="bold red")
-    header_text.append(f"| Neutras: {neutras} ({(neutras/total)*100:.0f}%)", style="bold white")
+    header_text.append(f"Buenas: {buenas} ({stats['pct_buenas']:.0f}%) ", style="bold green")
+    header_text.append(f"| Malas: {malas} ({stats['pct_malas']:.0f}%) ", style="bold red")
+    header_text.append(f"| Neutras: {neutras} ({stats['pct_neutras']:.0f}%)", style="bold white")
 
-    console.print(Panel(header_text, title="🎓 Monitor Inteligente UBA - Medios + MCP Redes Sociales", expand=False))
+    console.print(Panel(header_text, title="🎓 Monitor UBA - Medios y Redes Sociales", expand=False))
 
     table = Table(show_header=True, header_style="bold magenta")
     table.add_column("Sentimiento", width=12, justify="center")
@@ -113,7 +127,7 @@ def print_rich_dashboard(classified_news: List[Dict[str, Any]], query: str):
         sent = c["sentiment"]
         score_val = c["score"]
         occ = item.get("occurrences", 1)
-        date_str = item.get("date") or "Hoy"
+        date_str = item.get("date") or "Sin fecha"
         sources_list = item.get("sources") or ([item.get("source")] if item.get("source") else ["Web"])
         is_social = item.get("source_type") == "red_social"
 
@@ -124,7 +138,7 @@ def print_rich_dashboard(classified_news: List[Dict[str, Any]], query: str):
             sentiment_styled = "[bold red]🔴 MALA[/bold red]"
             score_styled = f"[red]{score_val:+.2f}[/red]"
         else:
-            sentiment_styled = "[bold white]⚪ NEUTRA[/bold white]"
+            sentiment_styled = "[bold white]⚪ NEUTRAL[/bold white]"
             score_styled = f"[white]{score_val:+.2f}[/white]"
 
         occ_styled = f"[bold yellow]🔁 {occ}x[/bold yellow]" if occ > 1 else f"[dim]1x[/dim]"

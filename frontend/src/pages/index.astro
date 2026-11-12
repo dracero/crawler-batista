@@ -19,23 +19,24 @@ import Header from '../components/Header.astro';
             Búsqueda, Conteo de Apariciones y Redes Sociales UBA
           </h2>
           <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-fuchsia-950/60 border border-fuchsia-800/70 text-fuchsia-300">
-            <span>🔌 MCP Redes:</span>
+            <span>🌐 Redes:</span>
             <span>𝕏 X · 📸 Instagram · 📘 Facebook</span>
           </span>
         </div>
         <p class="text-sm text-slate-400">
-          Agentes autónomos de <strong>LangGraph</strong> rastrean <strong>medios nacionales</strong> y conectores <strong>MCP de Redes Sociales</strong> (X, Instagram, Facebook), extraen las <strong>fechas de publicación</strong>, contabilizan cuántas veces apareció cada noticia junto a todas sus fuentes y clasifican el impacto con <strong>Google Gemini</strong>.
+          Pipeline en <strong>LangGraph</strong> que rastrea <strong>medios argentinos</strong> y <strong>redes sociales</strong> (X, Instagram, Facebook) sobre la UBA, extrae fechas de publicación, agrupa apariciones repetidas junto a sus fuentes y clasifica el impacto institucional con <strong>Google Gemini</strong>.
         </p>
 
         <form id="searchForm" class="grid grid-cols-1 md:grid-cols-12 gap-4 pt-2">
           <div class="md:col-span-8">
-            <label class="block text-xs font-medium text-slate-300 mb-1">Consulta / Tema</label>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Consulta / Tema (filtrado sobre la UBA)</label>
             <div class="relative">
               <input 
                 type="text" 
                 id="queryInput" 
                 value="UBA" 
-                placeholder="Ej: UBA, UBA presupuesto, Medicina UBA, etc." 
+                maxlength="200"
+                placeholder="Ej: UBA, presupuesto, Medicina, CBC, rectorado..." 
                 class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-slate-500"
                 required
               />
@@ -233,7 +234,29 @@ import Header from '../components/Header.astro';
   </footer>
 </Layout>
 
-<script is:inline>
+<script>
+  import Chart from "chart.js/auto";
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function sanitizeHttpUrl(rawUrl) {
+    const trimmed = String(rawUrl || "").trim();
+    if (!/^https?:\/\//i.test(trimmed)) return "#";
+    try {
+      const parsed = new URL(trimmed);
+      return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : "#";
+    } catch {
+      return "#";
+    }
+  }
+
   const searchForm = document.getElementById("searchForm");
   const queryInput = document.getElementById("queryInput");
   const limitInput = document.getElementById("limitInput");
@@ -273,8 +296,9 @@ import Header from '../components/Header.astro';
       if (!res.ok) throw new Error("Backend no disponible");
       const data = await res.json();
       if (data.gemini_configured) {
+        const keysLabel = data.gemini_keys_count > 1 ? ` · ${data.gemini_keys_count} keys` : "";
         llmStatusBadge.className = "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-emerald-950/60 border border-emerald-800 text-emerald-300";
-        llmStatusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400"></span><span>Google Gemini (${data.model})</span>`;
+        llmStatusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400"></span><span>Google Gemini (${escapeHtml(data.model)}${escapeHtml(keysLabel)})</span>`;
       } else {
         llmStatusBadge.className = "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-amber-950/60 border border-amber-800 text-amber-300";
         llmStatusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-400"></span><span>Modo Heurístico (Sin API Key)</span>`;
@@ -414,12 +438,18 @@ import Header from '../components/Header.astro';
     document.getElementById("filterCountSocial").textContent = socialCount;
     document.getElementById("filterCountRepeated").textContent = repeatedCount;
 
-    renderChart(data.stats.buenas, data.stats.malas, data.stats.neutras);
+    try {
+      renderChart(data.stats.buenas, data.stats.malas, data.stats.neutras);
+    } catch (err) {
+      console.warn("No se pudo renderizar el gráfico:", err);
+    }
     renderNewsCards(data.news);
   }
 
   function renderChart(buenas, malas, neutras) {
-    const ctx = document.getElementById("sentimentChart").getContext("2d");
+    const canvas = document.getElementById("sentimentChart");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
     if (chartInstance) chartInstance.destroy();
 
     chartInstance = new Chart(ctx, {
@@ -494,13 +524,18 @@ import Header from '../components/Header.astro';
         ? `🔁 Apareció ${occurrences} veces`
         : `1 aparición`;
 
+      const safeItemUrl = escapeHtml(sanitizeHttpUrl(item.url));
+      const safeItemTitle = escapeHtml(item.title || "Sin título");
+      const safeItemDate = escapeHtml(item.date || "Sin fecha");
+      const safeScore = Number.isFinite(Number(c.score)) ? Number(c.score) : 0;
+
       const typeBadge = isSocial
-        ? `<span class="px-2.5 py-0.5 rounded-lg border border-fuchsia-800/70 bg-fuchsia-950/60 text-fuchsia-300 text-xs font-semibold flex items-center gap-1">${getSourceIcon(item.source, "red_social")} Red Social</span>`
+        ? `<span class="px-2.5 py-0.5 rounded-lg border border-fuchsia-800/70 bg-fuchsia-950/60 text-fuchsia-300 text-xs font-semibold flex items-center gap-1">${escapeHtml(getSourceIcon(item.source, "red_social"))} Red Social</span>`
         : `<span class="px-2.5 py-0.5 rounded-lg border border-cyan-900/70 bg-cyan-950/50 text-cyan-300 text-xs font-medium flex items-center gap-1">📰 Medio</span>`;
 
       const sourcesBadgesHtml = sourcesList.map(src => {
-        const icon = getSourceIcon(src, isSocial ? "red_social" : "medio");
-        return `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800/90 border border-slate-700 text-xs text-slate-200 font-medium">${icon} ${src}</span>`;
+        const icon = escapeHtml(getSourceIcon(src, isSocial ? "red_social" : "medio"));
+        return `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800/90 border border-slate-700 text-xs text-slate-200 font-medium">${icon} ${escapeHtml(src)}</span>`;
       }).join("");
 
       const mentionsHtml = mentionsList.length > 1 ? `
@@ -510,22 +545,29 @@ import Header from '../components/Header.astro';
             <span class="text-[11px] text-slate-400">${sourcesList.length} ${sourcesList.length === 1 ? 'fuente' : 'fuentes distintas'}</span>
           </summary>
           <div class="mt-3 space-y-2 pt-2 border-t border-slate-800/80">
-            ${mentionsList.map((m, idx) => `
+            ${mentionsList.map((m, idx) => {
+              const safeMUrl = escapeHtml(sanitizeHttpUrl(m.url));
+              const safeMDate = escapeHtml(m.date || item.date || "Sin fecha");
+              const safeMSource = escapeHtml(m.source || "Web");
+              const safeMTitle = escapeHtml(m.title || item.title || "Sin título");
+              const safeMIcon = escapeHtml(getSourceIcon(m.source, m.source_type));
+              return `
               <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] py-1 border-b border-slate-900 last:border-0">
                 <div class="flex items-center gap-2 min-w-0">
                   <span class="text-slate-500 font-mono">#${idx + 1}</span>
-                  <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-mono shrink-0">📅 ${m.date || item.date || "Reciente"}</span>
-                  <span class="px-2 py-0.5 rounded bg-slate-800 text-cyan-300 font-semibold shrink-0">${getSourceIcon(m.source, m.source_type)} ${m.source}</span>
-                  <span class="text-slate-300 truncate">${m.title || item.title}</span>
+                  <span class="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-mono shrink-0">📅 ${safeMDate}</span>
+                  <span class="px-2 py-0.5 rounded bg-slate-800 text-cyan-300 font-semibold shrink-0">${safeMIcon} ${safeMSource}</span>
+                  <span class="text-slate-300 truncate">${safeMTitle}</span>
                 </div>
-                <a href="${m.url}" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:text-blue-300 shrink-0 font-medium">Abrir ↗</a>
+                <a href="${safeMUrl}" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:text-blue-300 shrink-0 font-medium">Abrir ↗</a>
               </div>
-            `).join("")}
+              `;
+            }).join("")}
           </div>
         </details>
       ` : "";
 
-      const dateBadgeHtml = `<span class="px-2.5 py-0.5 rounded-lg border border-slate-700 bg-slate-800/90 text-slate-200 text-xs font-mono flex items-center gap-1">📅 ${item.date || "Reciente"}</span>`;
+      const dateBadgeHtml = `<span class="px-2.5 py-0.5 rounded-lg border border-slate-700 bg-slate-800/90 text-slate-200 text-xs font-mono flex items-center gap-1">📅 ${safeItemDate}</span>`;
 
       const card = document.createElement("div");
       card.className = "bg-slate-900 border border-slate-800 hover:border-slate-700 transition-all rounded-2xl p-5 space-y-3.5";
@@ -533,17 +575,17 @@ import Header from '../components/Header.astro';
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="flex flex-wrap items-center gap-2">
             <span class="px-2.5 py-1 rounded-lg border text-xs font-bold ${badgeBg}">${badgeText}</span>
-            <span class="px-2 py-0.5 rounded text-xs font-mono font-bold ${scoreBadge}">${c.score >= 0 ? "+" : ""}${c.score.toFixed(2)}</span>
+            <span class="px-2 py-0.5 rounded text-xs font-mono font-bold ${scoreBadge}">${safeScore >= 0 ? "+" : ""}${safeScore.toFixed(2)}</span>
             ${typeBadge}
             <span class="px-2.5 py-0.5 rounded-lg border text-xs ${occBadgeClass}">${occText}</span>
-            <span class="text-xs px-2.5 py-0.5 rounded bg-slate-800 text-slate-400 font-medium">${c.category || "General"}</span>
+            <span class="text-xs px-2.5 py-0.5 rounded bg-slate-800 text-slate-400 font-medium">${escapeHtml(c.category || "General")}</span>
           </div>
           ${dateBadgeHtml}
         </div>
 
         <h3 class="text-base font-bold text-white leading-snug">
-          <a href="${item.url}" target="_blank" rel="noopener noreferrer" class="hover:text-blue-400 transition-colors inline-flex items-center gap-1.5">
-            <span>${item.title || "Sin título"}</span>
+          <a href="${safeItemUrl}" target="_blank" rel="noopener noreferrer" class="hover:text-blue-400 transition-colors inline-flex items-center gap-1.5">
+            <span>${safeItemTitle}</span>
             <span class="text-xs opacity-60">↗</span>
           </a>
         </h3>
@@ -560,11 +602,11 @@ import Header from '../components/Header.astro';
 
         <div class="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3.5 space-y-2">
           <p class="text-xs text-slate-300 leading-relaxed">
-            <strong class="text-slate-200">Justificación:</strong> ${c.justification}
+            <strong class="text-slate-200">Justificación:</strong> ${escapeHtml(c.justification)}
           </p>
           ${c.key_points && c.key_points.length > 0 ? `
             <ul class="text-[11px] text-slate-400 space-y-1 pl-4 list-disc marker:text-slate-600">
-              ${c.key_points.map(kp => `<li>${kp}</li>`).join("")}
+              ${c.key_points.map(kp => `<li>${escapeHtml(kp)}</li>`).join("")}
             </ul>
           ` : ""}
         </div>
@@ -572,8 +614,8 @@ import Header from '../components/Header.astro';
         ${mentionsHtml}
 
         <div class="flex items-center justify-between pt-1">
-          <span class="text-[11px] text-slate-500 truncate max-w-xs sm:max-w-md">${item.url}</span>
-          <a href="${item.url}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">
+          <span class="text-[11px] text-slate-500 truncate max-w-xs sm:max-w-md">${escapeHtml(item.url)}</span>
+          <a href="${safeItemUrl}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors">
             <span>Abrir publicación original</span>
             <span class="text-xs">→</span>
           </a>
@@ -605,6 +647,7 @@ import Header from '../components/Header.astro';
     a.href = url;
     a.download = `reporte_uba_${Date.now()}.md`;
     a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
 
   document.getElementById("btnExportJson").addEventListener("click", () => {
@@ -615,5 +658,6 @@ import Header from '../components/Header.astro';
     a.href = url;
     a.download = `datos_uba_${Date.now()}.json`;
     a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
 </script>

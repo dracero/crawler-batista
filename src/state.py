@@ -1,4 +1,4 @@
-from typing import List, Optional, Literal, TypedDict
+from typing import List, Optional, Literal, TypedDict, Dict, Any
 from pydantic import BaseModel, Field
 
 class MentionItem(BaseModel):
@@ -55,6 +55,36 @@ class AnalyzedNews(BaseModel):
     mentions: List[MentionItem] = Field(default_factory=list)
     classification: NewsClassification
 
+class AnalysisStats(BaseModel):
+    buenas: int = 0
+    malas: int = 0
+    neutras: int = 0
+    total_mentions: int = 0
+    social_count: int = 0
+    media_count: int = 0
+    pct_buenas: float = 0.0
+    pct_malas: float = 0.0
+    pct_neutras: float = 0.0
+    avg_score: float = 0.0
+
+
+class AnalyzeResponse(BaseModel):
+    query: str
+    total: int
+    stats: AnalysisStats
+    news: List[AnalyzedNews]
+    summary_report: str
+
+
+class ConfigResponse(BaseModel):
+    gemini_configured: bool
+    gemini_keys_count: int
+    gemini_key_status: Dict[str, Any]
+    model: str
+    default_query: str = "UBA"
+    social_status: Dict[str, Any]
+
+
 class GraphState(TypedDict):
     query: str
     max_results: int
@@ -62,4 +92,3 @@ class GraphState(TypedDict):
     crawled_articles: List[dict]
     classified_news: List[dict]
     summary_report: str
-    errors: List[str]

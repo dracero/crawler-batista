@@ -1,4 +1,4 @@
-"""Agente Buscador: Búsqueda multi-medio en Argentina y conectores MCP de Redes Sociales (X, Instagram, Facebook, TikTok, YouTube, Reddit) con fechas normalizadas, conteo de apariciones y agrupación de fuentes."""
+"""Agente Buscador: Búsqueda paralela multi-medio en Argentina y redes sociales (X, Instagram, Facebook) con fechas normalizadas, conteo de apariciones y agrupación de fuentes."""
 
 import re
 import difflib
@@ -7,6 +7,7 @@ import unicodedata
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any, Set, Optional, Tuple
 from src.state import GraphState, SearchResult, MentionItem
 from src.mcp_social import (
@@ -398,29 +399,9 @@ def fetch_rss_query(rss_query: str, max_items: int = 20) -> List[SearchResult]:
     return items_out
 
 
-def search_uba_news(query: str, max_results: int = 5) -> List[SearchResult]:
-    """
-    Búsqueda integral en los principales medios argentinos y conectores MCP de Redes Sociales (X, Instagram, Facebook).
-    - Agrupa y cuenta la cantidad de apariciones de noticias repetidas junto con sus fuentes.
-    - Incluye resultados de X (Twitter), Instagram y Facebook con sus fechas exactas.
-    """
-    raw_media_results: List[SearchResult] = []
-
-    search_term = query.strip()
-    if "universidad" not in search_term.lower() and "buenos aires" not in search_term.lower():
-        search_term = f"{search_term} Universidad de Buenos Aires"
-
-    logger.info(f"Buscando en medios argentinos y MCP de Redes Sociales (X, Instagram, Facebook) para '{search_term}'...")
-
-    # 1. Búsqueda amplia en los principales medios nacionales para capturar todas las apariciones repetidas
-    media_sites = " OR ".join([f"site:{d}" for d in ARGENTINE_DOMAINS])
-    targeted_query = f"({query} OR \"Universidad de Buenos Aires\") ({media_sites})"
-    raw_media_results.extend(fetch_rss_query(targeted_query, max_items=max(25, max_results * 5)))
-
-    # 2. Búsqueda general en Google News Argentina
-    raw_media_results.extend(fetch_rss_query(f"{search_term}", max_items=max(25, max_results * 5)))
-
-    # 3. Búsqueda en DuckDuckGo News Argentina
+def _fetch_ddg_news(search_term: str, max_results: int) -> List[SearchResult]:
+    """Consulta DuckDuckGo News para Argentina y normaliza fechas/fuentes."""
+    ddg_results: List[SearchResult] = []
     try:
         with DDGS(timeout=6) as ddgs:
             ddg_items = list(ddgs.news(
@@ -435,7 +416,7 @@ def search_uba_news(query: str, max_results: int = 5) -> List[SearchResult]:
                 title = d.get("title", "")
                 if url and title:
                     norm_src, src_type = normalize_source_name(title, url, d.get("source"))
-                    raw_media_results.append(SearchResult(
+                    ddg_results.append(SearchResult(
                         title=title.strip(),
                         url=url.strip(),
                         snippet=d.get("body", "").strip(),
@@ -445,9 +426,40 @@ def search_uba_news(query: str, max_results: int = 5) -> List[SearchResult]:
                     ))
     except Exception as e:
         logger.warning(f"DuckDuckGo News temporalmente no disponible ({e}), usando RSS.")
+    return ddg_results
 
-    # 4. Búsqueda mediante Conectores MCP de Redes Sociales: X (Twitter), Instagram y Facebook
-    social_by_platform = search_all_social_mcp(query=query, max_per_platform=3)
+
+def search_uba_news(query: str, max_results: int = 5) -> List[SearchResult]:
+    """
+    Búsqueda paralela en medios argentinos y redes sociales (X, Instagram, Facebook) sobre la UBA.
+    - `query` se interpreta como filtro temático dentro del ámbito UBA.
+    - Agrupa y cuenta apariciones de noticias repetidas junto con sus fuentes.
+    """
+    raw_media_results: List[SearchResult] = []
+
+    search_term = query.strip()
+    if "universidad" not in search_term.lower() and "buenos aires" not in search_term.lower():
+        search_term = f"{search_term} Universidad de Buenos Aires"
+
+    logger.info(f"Buscando en paralelo en medios argentinos y redes sociales (X, Instagram, Facebook) para '{search_term}'...")
+
+    media_sites = " OR ".join([f"site:{d}" for d in ARGENTINE_DOMAINS])
+    targeted_query = f"({query} OR \"Universidad de Buenos Aires\") ({media_sites})"
+    rss_limit = max(25, max_results * 5)
+
+    # Ejecutar en paralelo RSS dirigido, RSS general, DuckDuckGo News y búsqueda social
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        fut_rss_targeted = executor.submit(fetch_rss_query, targeted_query, rss_limit)
+        fut_rss_general = executor.submit(fetch_rss_query, f"{search_term}", rss_limit)
+        fut_ddg = executor.submit(_fetch_ddg_news, search_term, max_results)
+        fut_social = executor.submit(search_all_social_mcp, query, 3)
+
+        raw_media_results.extend(fut_rss_targeted.result())
+        raw_media_results.extend(fut_rss_general.result())
+        raw_media_results.extend(fut_ddg.result())
+        social_by_platform = fut_social.result()
+
+    # 4. Agrupación y conteo en redes sociales
     x_items = aggregate_and_count_results(social_by_platform.get("x", []))
     ig_items = aggregate_and_count_results(social_by_platform.get("instagram", []))
     fb_items = aggregate_and_count_results(social_by_platform.get("facebook", []))

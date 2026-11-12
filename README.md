@@ -1,231 +1,163 @@
-# 🎓 Monitor Inteligente de Noticias y Redes Sociales UBA (Full-Stack Multi-Agente + MCP)
+# Monitor de Noticias y Redes Sociales UBA
 
-Sistema autónomo **Full-Stack** basado en una arquitectura **multi-agente con LangGraph**, **conectores MCP de Redes Sociales (X, Instagram, Facebook)**, **Crawl4AI + Playwright**, **Astro.js v5**, **FastAPI**, **uv** y **Google Gemini (3.6 Flash)** para rastrear noticias y publicaciones sobre la Universidad de Buenos Aires (UBA), **contabilizar cuántas veces aparece cada noticia sin descartarlas**, consolidar **todas las fuentes y fechas de publicación**, extraer su contenido limpio y clasificar su impacto institucional en **Buenas**, **Malas** o **Neutras**.
+Aplicación full-stack para relevar, agrupar, extraer y clasificar noticias y publicaciones públicas sobre la Universidad de Buenos Aires (UBA). Combina un grafo multi-agente en **LangGraph** (`FastAPI`, `Crawl4AI`/`Playwright` y `Google Gemini`) con una interfaz estática en **Astro.js v5** y una CLI basada en **Rich**.
 
----
+Para el detalle de decisiones de diseño, alternativas evaluadas y límites operativos, ver [DESIGN.md](DESIGN.md).
 
-## 📑 Tabla de Contenidos
+## Tabla de Contenidos
 
-1. [Visión General y Capacidades](#-visión-general-y-capacidades)
-2. [Arquitectura del Sistema](#-arquitectura-del-sistema)
-3. [Cómo Funciona Todo Paso a Paso](#-cómo-funciona-todo-paso-a-paso)
-   - [1. Rastreo Multi-Medio y Conectores MCP de Redes Sociales](#1-rastreo-multi-medio-y-conectores-mcp-de-redes-sociales)
-   - [2. Conteo de Apariciones y Agrupación de Fuentes (Sin Descarte)](#2-conteo-de-apariciones-y-agrupación-de-fuentes-sin-descarte)
-   - [3. Extracción y Decodificación Matemática de Fechas](#3-extracción-y-decodificación-matemática-de-fechas)
-   - [4. Scraping Web Asíncrono con Crawl4AI y Playwright](#4-scraping-web-asíncrono-con-crawl4ai-y-playwright)
-   - [5. Clasificación Estructurada con Google Gemini y Failover](#5-clasificación-estructurada-con-google-gemini-y-failover)
-   - [6. Reportes, Streaming SSE y Dashboard Interactivo](#6-reportes-streaming-sse-y-dashboard-interactivo)
-4. [Pila Tecnológica (Tech Stack)](#-pila-tecnológica-tech-stack)
-5. [Estructura del Repositorio](#-estructura-del-repositorio)
-6. [Instalación y Configuración](#-instalación-y-configuración)
-7. [Modos de Ejecución](#-modos-de-ejecución)
-8. [Endpoints de la API Backend y Esquema de Datos](#-endpoints-de-la-api-backend-y-esquema-de-datos)
-9. [Criterios de Clasificación](#-criterios-de-clasificación)
-10. [Solución de Problemas Frecuentes](#-solución-de-problemas-frecuentes)
+1. [Capacidades Principales](#capacidades-principales)
+2. [Arquitectura del Sistema](#arquitectura-del-sistema)
+3. [Funcionamiento Paso a Paso](#funcionamiento-paso-a-paso)
+4. [Pila Tecnológica y Estructura del Repositorio](#pila-tecnológica-y-estructura-del-repositorio)
+5. [Requisitos Previos e Instalación](#requisitos-previos-e-instalación)
+6. [Modos de Ejecución y Verificación](#modos-de-ejecución-y-verificación)
+7. [API Backend y Esquema de Datos](#api-backend-y-esquema-de-datos)
+8. [Criterios de Clasificación](#criterios-de-clasificación)
 
 ---
 
-## 🌟 Visión General y Capacidades
+## Capacidades Principales
 
-- **Cobertura nacional de medios periodísticos**: Rastrea artículos de Clarín, La Nación, Infobae, Página 12, TN, Perfil, Ámbito Financiero, El Cronista, El Destape, C5N, Tiempo Argentino y agencias nacionales.
-- **Conectores MCP de Redes Sociales integrados (`src/mcp_social.py`)**: Incorpora publicaciones reales de **𝕏 X (Twitter)**, **📸 Instagram** (posts y reels) y **📘 Facebook**, garantizando presencia de las tres redes sociales junto a las noticias más relevantes de los medios.
-- **Conteo de apariciones y fuentes (en lugar de eliminar duplicados)**: Cuando una misma noticia aparece en múltiples diarios o portales, el sistema **no descarta las repeticiones**, sino que:
-  - Incrementa el contador de apariciones (`🔁 Nx`, ej. *Apareció 18 veces*).
-  - Lista **todas las fuentes** donde se publicó (`Clarín`, `La Nación`, `Infobae`, `TN`, `Perfil`, `Ámbito`, etc.).
-  - Conserva el desglose completo de cada aparición individual (`mentions`) con su título original, fuente, fecha y enlace directo.
-  - Ordena los resultados priorizando las noticias con mayor cantidad de apariciones.
-- **Fechas exactas en cada noticia y posteo**: Normaliza fechas en formato `DD/MM/YYYY HH:MM` combinando metadatos RSS/ISO con decodificación matemática directa desde los identificadores de URL de redes sociales (**Snowflake ID** en X/Twitter y **Shortcode Base64URL** en Instagram).
-- **Scraping asíncrono con navegador real**: **Crawl4AI** sobre **Playwright Chromium headless** navega redirecciones dinámicas y extrae el cuerpo limpio del artículo en Markdown.
-- **Clasificación estructurada con LLM**: Evalúa impacto (`BUENA`, `MALA`, `NEUTRAL`), puntuación numérica (`-1.0` a `+1.0`), categoría, justificación y puntos clave mediante **Google Gemini 3.6 Flash** y esquemas tipados en **Pydantic v2**.
-- **Dashboard Web en Astro.js v5**: Seguimiento en vivo del pipeline de agentes mediante **Server-Sent Events (SSE)**, tarjetas KPI con total de apariciones, gráfico de dona con Chart.js, filtros por sentimiento / **📱 Redes Sociales** / **🔁 Repetidas**, insignias de fecha y exportación a Markdown y JSON.
+- **Búsqueda paralela en medios argentinos y redes sociales**: consulta Google News RSS, DuckDuckGo News y búsquedas dirigidas en `X`, `Instagram` y `Facebook` (con enriquecimiento público de tweets vía FxTwitter cuando aplica). Las consultas introducidas actúan siempre como filtro temático dentro del ámbito UBA y Argentina.
+- **Agrupación por similitud y conteo de apariciones**: consolida cobertura repetida de un mismo hecho dentro de cada tipo de fuente, manteniendo el conteo total (`occurrences`), la lista de medios o cuentas (`sources`) y el historial individual (`mentions`).
+- **Normalización de fechas**: decodifica marcas temporales desde IDs Snowflake de X, shortcodes de Instagram, metadatos RSS/ISO-8601 y fragmentos relativos en hora Argentina (`America/Argentina/Buenos_Aires`). Si una fuente no provee fecha verificable, devuelve `Sin fecha` (`null`) sin inventar la fecha actual.
+- **Extracción web concurrente y acotada**: utiliza Crawl4AI y Playwright (Chromium headless) validando destinos HTTP/HTTPS públicos, con respaldo automático en snippets de búsqueda cuando un portal bloquea el acceso.
+- **Clasificación estructurada con rotación de claves**: integra Google Gemini 3.6 (`gemini-3.6-flash`) mediante esquema Pydantic (`BUENA`, `MALA`, `NEUTRAL`), rotación round-robin de API keys, cooldowns y clasificador heurístico por palabras clave si todas las claves se agotan. No utiliza versiones distintas a 3.6.
+- **Interfaz web y CLI**: transmite progreso por SSE desde el grafo LangGraph al dashboard Astro.js (filtros en cliente, gráfico con `Chart.js` empaquetado localmente y exportación Markdown/JSON) o imprime tablas resumen desde terminal.
 
 ---
 
-## 🏛️ Arquitectura del Sistema
+## Arquitectura del Sistema
 
 ```mermaid
-flowchart TD
-    subgraph Frontend ["Frontend Web (Astro.js v5 - Puerto 4321)"]
-        UI["Dashboard Interactivo (Tailwind CSS + Chart.js)"]
-        SSE_Client["Cliente SSE (EventSource)"]
+flowchart TB
+    subgraph Client["Clientes"]
+        WebUI["Dashboard Web (Astro v5)"]
+        CLI["Terminal CLI (Rich)"]
     end
 
-    subgraph Backend ["Backend (FastAPI + uv - Puerto 8000)"]
-        API["Router FastAPI (/api/stream, /api/analyze, /api/config)"]
-        
-        subgraph Graph ["Flujo Multi-Agente (LangGraph)"]
-            A1["1. Agente Buscador<br/>(Medios Nacionales + RSS + DDG)"]
-            MCP["Conectores MCP Redes Sociales<br/>(X/Twitter, Instagram, Facebook)"]
-            AGG["Agrupador, Contador de Apariciones (🔁 Nx)<br/>y Decodificador de Fechas (📅 DD/MM/YYYY)"]
-            A2["2. Agente Crawler<br/>(Crawl4AI + Playwright Chromium)"]
-            A3["3. Agente Clasificador<br/>(Google Gemini 3.6 Flash + Pydantic)"]
-            A4["4. Agente Reportero<br/>(KPIs, Tabla Rich y Reporte Markdown)"]
+    subgraph Backend["Backend Python (FastAPI + LangGraph)"]
+        API["FastAPI (/api/stream, /api/analyze, /api/config)"]
+        subgraph Graph["StateGraph (searcher -> crawler -> classifier -> reporter)"]
+            A1["1. searcher (Medios RSS/DDG + X/IG/FB)"]
+            A2["2. crawler (Crawl4AI + Playwright)"]
+            A3["3. classifier (Gemini + KeyRotator)"]
+            A4["4. reporter (Estadísticas + Informe MD)"]
+            A1 --> A2 --> A3 --> A4
         end
+        API -->|astream / ainvoke| Graph
+        CLI -->|invoke| Graph
     end
 
-    UI -->|Petición de análisis| SSE_Client
-    SSE_Client -->|Streaming en vivo| API
-    API --> A1
-    A1 <--> MCP
-    A1 --> AGG
-    AGG --> A2
-    A2 --> A3
-    A3 --> A4
-    A4 -->|Eventos SSE + JSON final| SSE_Client
+    API -->|Eventos SSE + JSON final| WebUI
 ```
 
----
-
-## 🔍 Cómo Funciona Todo Paso a Paso
-
-### 1. Rastreo Multi-Medio y Conectores MCP de Redes Sociales
-Cuando el usuario ingresa una consulta (por defecto `"UBA"`), el **Agente Buscador** (`src/agents/searcher.py`) ejecuta en paralelo dos grandes barridos:
-- **Barrido de Medios Periodísticos**:
-  1. Consulta focalizada en Google News RSS sobre los principales dominios argentinos (`clarin.com`, `lanacion.com.ar`, `infobae.com`, `pagina12.com.ar`, `tn.com.ar`, `perfil.com`, `ambito.com`, `cronista.com`, `eldestapeweb.com`, `c5n.com`, `tiempoar.com.ar`).
-  2. Consulta abierta en Google News Argentina para capturar radios, canales y diarios provinciales que cubren los mismos hechos.
-  3. Consulta en DuckDuckGo News Argentina (`region="ar-es"`).
-- **Barrido MCP de Redes Sociales (`src/mcp_social.py`)**:
-  - **`search_x_mcp`**: Rastrea publicaciones en **X (Twitter)** (`x.com`), identifica el usuario (`@UBAonline`, `@UBARectorado`, etc.) y, cuando detecta un enlace `/status/<id>`, consulta la API pública de **FxTwitter** (`api.fxtwitter.com`) para enriquecer el resultado con el texto completo del tweet, autor, cantidad de likes y retweets.
-  - **`search_instagram_mcp`**: Rastrea publicaciones y reels en **Instagram** (`instagram.com/p/` e `instagram.com/reel/`), extrae el caption de la publicación y las ordena de la más reciente a la más antigua.
-  - **`search_facebook_mcp`**: Rastrea páginas y publicaciones de **Facebook** (`facebook.com`), filtrando enlaces publicitarios externos y extrayendo el texto del posteo.
+CLI (`main.py`), `POST /api/analyze` y `GET /api/stream` comparten el mismo grafo `LangGraph` definido en [src/graph.py](src/graph.py).
 
 ---
 
-### 2. Conteo de Apariciones y Agrupación de Fuentes (Sin Descarte)
-En lugar de eliminar noticias duplicadas, la función `aggregate_and_count_results` en `src/agents/searcher.py` agrupa todas las coberturas de un mismo hecho noticioso:
-1. **Normalización de titulares y fuentes**:
-   - Identifica y unifica el nombre del medio o red social (`normalize_source_name`).
-   - Limpia firmas de diarios al final del título (`- Clarín`, `| Infobae`, etc.) y términos institucionales genéricos (`strip_boilerplate_terms`).
-2. **Detección semántica de la misma noticia (`is_duplicate_story`)**:
-   - Extrae las raíces léxicas en español (*stemming*) mediante `nltk.stem.SnowballStemmer("spanish")` sobre las palabras significativas del titular.
-   - Compara tanto la superposición de raíces léxicas (`>= 3` raíces compartidas y `>= 40%` del titular) como la similitud de secuencias (`difflib.SequenceMatcher >= 0.58`).
-3. **Acumulación no destructiva**:
-   - Cada vez que se detecta otra aparición de la misma noticia:
-     - Se incrementa `occurrences += 1` (ej. `🔁 18 apariciones`).
-     - Se añade el medio o red a la lista `sources` (ej. `['Clarín', 'TN', 'La Nación', 'Perfil', 'Ámbito', 'Infobae', 'Página 12', ...]`).
-     - Se agrega un objeto `MentionItem` a la lista `mentions` con el titular específico, la fuente, la fecha y el link de esa aparición.
+## Funcionamiento Paso a Paso
+
+### 1. Búsqueda y agrupación de apariciones (`src/agents/searcher.py`, `src/mcp_social.py`)
+
+- Ejecuta en paralelo consultas a Google News RSS (medios configurados en `ARGENTINE_DOMAINS` y búsqueda general Argentina), DuckDuckGo News y los adaptadores sociales en proceso para `X`, `Instagram` y `Facebook`.
+- Normaliza los nombres de fuente (por ejemplo, variantes de `Ámbito`, `Clarín`, `La Nación` o perfiles sociales) y agrupa titulares equivalentes mediante stemming léxico en español y similitud de secuencias.
+- Selecciona hasta `max_results` temas combinando resultados de medios ordenados por `occurrences` y representación de redes sociales cuando existen resultados disponibles.
+
+### 2. Extracción de contenido (`src/agents/crawler.py`)
+
+- Toma la URL representativa de cada tema agrupado, verifica que corresponda a un destino HTTP(S) público (bloqueando direcciones locales o redes privadas) y ejecuta Chromium headless con concurrencia acotada para convertir el cuerpo principal a Markdown.
+- Si un sitio bloquea el scraper o devuelve error, conserva el resumen de búsqueda y los titulares de las menciones agrupadas para que el clasificador evalúe el tema sin fallar el flujo.
+
+### 3. Clasificación y rotación de API Keys (`src/agents/classifier.py`, `src/key_manager.py`)
+
+- Combina el snippet, hasta diez menciones agrupadas y el Markdown extraído (acotado al contexto configurado) y solicita una salida estructurada `NewsClassification` a Google Gemini utilizando exclusivamente la versión 3.6 (`gemini-3.6-flash`).
+- `GeminiKeyRotator` rota las claves configuradas de forma thread-safe, aplica cooldown temporal ante errores `429` y excluye claves inválidas (`401`/`403`). Si todas las claves disponibles están en cooldown, abre el circuito temporalmente hacia el respaldo heurístico por palabras clave en lugar de reintentar claves bloqueadas.
+- No utiliza versiones alternativas distintas a 3.6. Ante cualquier error que impida clasificar con el pool de claves en Gemini 3.6, se conmuta limpiamente al clasificador heurístico de respaldo.
+
+### 4. Reporte y entrega (`src/agents/reporter.py`, `server.py`, `frontend/`)
+
+- Calcula estadísticas agregadas en un único helper compartido (`compute_stats`) y genera un informe en Markdown.
+- En modo web, FastAPI emite por `GET /api/stream` los cambios de estado del grafo mediante SSE hacia el frontend estático compilado en Astro.js.
 
 ---
 
-### 3. Extracción y Decodificación Matemática de Fechas
-La función `extract_and_format_date` en `src/mcp_social.py` garantiza que **todas** las noticias y publicaciones tengan su fecha en formato `DD/MM/YYYY` (o `DD/MM/YYYY HH:MM`):
-- **X (Twitter) — Decodificación de Snowflake ID (`decode_x_snowflake_date`)**:
-  Cada URL `/status/<id>` contiene un entero de 64 bits de Twitter Snowflake. Desplazando 22 bits a la derecha y sumando el epoch de Twitter (`1288834974657`), se obtiene el timestamp exacto de publicación al segundo:
-  $$\text{timestamp\_ms} = (\text{status\_id} \gg 22) + 1288834974657$$
-- **Instagram — Decodificación de Shortcode Base64URL (`decode_instagram_shortcode_date`)**:
-  Cada post `/p/<shortcode>/` o reel `/reel/<shortcode>/` utiliza un identificador de 11 caracteres en alfabeto Base64URL que codifica un entero de 64 bits con el timestamp de creación de Instagram (`epoch = 1314220021721`):
-  $$\text{timestamp\_ms} = (\text{base64\_to\_int}(\text{shortcode}) \gg 23) + 1314220021721$$
-- **TikTok — Decodificación de Video ID (`decode_tiktok_video_date`)**:
-  Los primeros 32 bits del ID numérico del video (`video_id >> 32`) corresponden al timestamp Unix en segundos.
-- **Medios y Facebook (`parse_snippet_date`)**:
-  Parsea cabeceras estándar **RFC-2822** de Google News RSS, fechas **ISO-8601** de DuckDuckGo News y prefijos temporales en snippets (`"Oct 28, 2026 ·"`, `"3 days ago ·"`, `"21 hours ago ·"`).
+## Pila Tecnológica y Estructura del Repositorio
 
----
-
-### 4. Scraping Web Asíncrono con Crawl4AI y Playwright
-El **Agente Crawler** (`src/agents/crawler.py`) recibe las URLs seleccionadas y levanta una instancia de **Chromium headless** gestionada por **Crawl4AI**:
-- Aplica configuraciones adaptativas según si el destino es un portal de noticias o una red social (`delay_before_return_html`, `page_timeout` y eliminación de overlays/popups).
-- Extrae el cuerpo del artículo en Markdown limpio y lo combina con los fragmentos de búsqueda y el listado de apariciones en otros medios (`build_combined_content`).
-
----
-
-### 5. Clasificación Estructurada con Google Gemini y Failover
-El **Agente Clasificador** (`src/agents/classifier.py`) envía a **Google Gemini** el título, la fuente principal, la cantidad de apariciones detectadas, la lista de todas las fuentes y el contenido recopilado:
-- Usa `llm.with_structured_output(NewsClassification)` para obtener un objeto validado por Pydantic con `sentiment`, `score`, `category`, `key_points` y `justification`.
-- **Failover rápido multi-modelo**: Si el modelo principal (`gemini-3.6-flash`) devuelve alta demanda (`503`) o no está disponible, conmuta automáticamente sin bloqueos (`timeout=20`, `max_retries=0`) hacia `gemini-3.7-flash` -> `gemini-3.8-flash` -> clasificador heurístico de respaldo (`rule_based_fallback_classifier`).
-
----
-
-### 6. Reportes, Streaming SSE y Dashboard Interactivo
-- **En Terminal (`src/agents/reporter.py`)**: Imprime un panel resumen con el total de noticias, total de apariciones (`🔁 Nx`), cantidad de redes sociales (`📱 X/IG/FB`) y una tabla `Rich` con columnas de **Sentimiento**, **Score**, **Fecha**, **Apariciones**, **Fuentes** y **Título/Resumen**.
-- **En la Web (`server.py` + `frontend/src/pages/index.astro`)**:
-  - El endpoint `/api/stream` transmite por **Server-Sent Events (SSE)** el progreso en vivo de cada uno de los 4 agentes.
-  - Al finalizar, el dashboard renderiza las tarjetas KPI, el medidor de sentimiento promedio, el gráfico de dona y la lista de tarjetas con filtros instantáneos (`Todas`, `🟢 Buenas`, `🔴 Malas`, `⚪ Neutras`, `📱 Redes Sociales`, `🔁 Repetidas`).
-
----
-
-## 🛠️ Pila Tecnológica (Tech Stack)
-
-### Backend y Agentes
-- **Python 3.12** gestionado con **`uv`** (`pyproject.toml` + `uv.lock`)
-- **LangGraph** & **LangChain**: Orquestación del grafo de estado multi-agente (`StateGraph`).
-- **Google GenAI (`gemini-3.6-flash`)**: Clasificación de sentimiento e impacto institucional con salida estructurada.
-- **Conectores MCP Sociales (`src/mcp_social.py`)**: Integración para X (Twitter), Instagram y Facebook con decodificación de fechas.
-- **Crawl4AI** & **Playwright Chromium**: Scraping web asíncrono con navegador real.
-- **Google News RSS** & **DuckDuckGo (`ddgs`)**: Motores de búsqueda de noticias y redes.
-- **NLTK (`SnowballStemmer`)**: Stemming léxico en español para agrupar noticias repetidas.
-- **FastAPI** & **Uvicorn**: Servidor web asíncrono con soporte REST y SSE.
-- **Pydantic v2** & **Rich**: Validación de datos y visualización en terminal.
-
-### Frontend y Orquestación
-- **Astro.js v5**: Framework web moderno y ultrarrápido.
-- **Tailwind CSS**: Diseño oscuro responsivo.
-- **Chart.js**: Gráfico interactivo de distribución de sentimiento.
-- **Concurrently**: Ejecución simultánea de Backend (`uv run uvicorn`) y Frontend (`astro dev`) con un solo comando (`npm run dev`).
-
----
-
-## 📁 Estructura del Repositorio
+- **Backend**: Python 3.12+, `uv`, FastAPI, Uvicorn, LangGraph, Pydantic v2, `langchain-google-genai`.
+- **Extracción y NLP**: `crawl4ai`, `playwright`, `ddgs`, `nltk` (`SnowballStemmer`).
+- **Frontend**: Astro.js v5, Tailwind CSS, `chart.js` (empaquetado con Vite en el build estático) y Rich para salida CLI.
 
 ```text
-crawler-batista/
-├── .env.example              # Plantilla de variables de entorno (GEMINI_API_KEY, GEMINI_MODEL)
-├── .gitignore                # Reglas de exclusión para Git (.venv, node_modules, .env, dist)
-├── pyproject.toml            # Definición del proyecto Python y dependencias para uv
-├── uv.lock                   # Lockfile determinista de uv
-├── requirements.txt          # Listado de dependencias Python compatible con pip/uv
-├── package.json              # Scripts principales (npm run dev, build, start) con uv + concurrently
-├── main.py                   # Punto de entrada para ejecución por línea de comandos (CLI)
-├── server.py                 # Servidor API FastAPI con endpoints SSE (/api/stream) y REST
-├── README.md                 # Documentación completa del sistema
-├── src/                      # Código fuente del Backend y Agentes
-│   ├── state.py              # Esquemas Pydantic (MentionItem, SearchResult, AnalyzedNews, GraphState)
-│   ├── graph.py              # Construcción y compilación del StateGraph de LangGraph
-│   ├── mcp_social.py         # Conectores MCP para X, Instagram y Facebook + Decodificador de Fechas
+crawler/
+├── .env.example              # Plantilla de variables de entorno
+├── DESIGN.md                 # Decisiones de arquitectura, alternativas y límites
+├── README.md                 # Documentación principal
+├── main.py                   # Punto de entrada CLI
+├── server.py                 # Servidor FastAPI (REST, SSE y frontend estático)
+├── package.json              # Scripts de desarrollo y build (dev, build, start)
+├── pyproject.toml            # Dependencias Python (gestión canónica con uv)
+├── uv.lock                   # Lockfile de dependencias Python
+├── src/
+│   ├── graph.py              # Grafo LangGraph síncrono y asíncrono
+│   ├── key_manager.py        # Rotación y cooldown de claves Gemini
+│   ├── mcp_social.py         # Búsqueda social (X, Instagram, Facebook) y normalización de fechas
+│   ├── state.py              # TypedDict GraphState y modelos Pydantic de respuesta
 │   └── agents/
-│       ├── searcher.py       # Agente Buscador multi-medio + agrupador y contador de apariciones
-│       ├── crawler.py        # Agente Crawler asíncrono con Crawl4AI y Playwright Chromium
-│       ├── classifier.py     # Agente Clasificador con Google Gemini y failover automático
-│       └── reporter.py       # Agente Reportero (Dashboard Rich en consola e informe Markdown)
-└── frontend/                 # Aplicación Frontend en Astro.js v5
-    ├── package.json          # Dependencias de Astro v5 y Tailwind CSS
-    ├── astro.config.mjs      # Configuración de Astro (:4321) y proxy hacia FastAPI (:8000)
-    ├── tailwind.config.mjs   # Configuración de estilos Tailwind
+│       ├── searcher.py       # Búsqueda paralela y agrupación léxica
+│       ├── crawler.py        # Scraping concurrente acotado y validación SSRF
+│       ├── classifier.py     # Clasificación Gemini, circuit breaker y respaldo heurístico
+│       └── reporter.py       # Estadísticas compartidas, informe Markdown y tablas Rich
+└── frontend/
+    ├── astro.config.mjs      # Configuración de Astro y proxy /api -> :8000 en dev
+    ├── package.json          # Dependencias Astro, Tailwind y Chart.js
     └── src/
-        ├── layouts/
-        │   └── Layout.astro  # Layout base HTML5 con carga de Chart.js
-        ├── components/
-        │   └── Header.astro  # Barra superior con estado de conexión a Gemini
-        └── pages/
-            └── index.astro   # Dashboard interactivo con SSE, filtros, fechas, fuentes y exportación
+        ├── layouts/Layout.astro
+        ├── components/Header.astro
+        └── pages/index.astro # Dashboard interactivo (SSE, Chart.js, filtros, exportación)
 ```
 
 ---
 
-## ⚙️ Instalación y Configuración
+## Requisitos Previos e Instalación
 
-### 1. Configurar variables de entorno
-Copia el archivo de ejemplo y coloca tu clave de API de Google Gemini:
-```bash
-cp .env.example .env
-```
-Edita `.env`:
-```env
-# API Key de Google Gemini (obtenible en https://aistudio.google.com/)
-GEMINI_API_KEY=tu_api_key_aqui
+- **Python** `>= 3.12`
+- **uv** (gestor de entornos y dependencias Python)
+- **Node.js** `>= 18` y **npm**
 
-# Modelo predeterminado
-GEMINI_MODEL=gemini-3.6-flash
-```
-*(Si no se configura `GEMINI_API_KEY`, el sistema funciona igualmente utilizando el clasificador heurístico de respaldo).*
+1. **Instalar dependencias Python y Chromium (Playwright)**:
 
-### 2. Instalar entorno Python con `uv` y navegador de Playwright
 ```bash
 uv sync
 uv run playwright install chromium
 ```
 
-### 3. Instalar dependencias de Node.js (raíz y frontend)
+En distribuciones Linux sin dependencias gráficas previas del navegador, ejecuta también:
+
+```bash
+uv run playwright install-deps chromium
+```
+
+2. **Configurar variables de entorno**:
+
+```bash
+cp .env.example .env
+```
+
+Edita `.env` con al menos una clave válida de [Google AI Studio](https://aistudio.google.com/):
+
+```dotenv
+# Clave única o varias separadas por coma para rotación automática
+GEMINI_API_KEY=tu_api_key_1,tu_api_key_2
+# Modelo fijo: exclusivamente versión 3.6 (gemini-3.6-flash)
+GEMINI_MODEL=gemini-3.6-flash
+```
+
+El gestor acepta también `GEMINI_API_KEYS`, `GOOGLE_API_KEY` o variables numeradas (`GEMINI_API_KEY_1`, `GEMINI_API_KEY_2`, ...). Si no hay claves válidas configuradas, el sistema opera con el clasificador heurístico por palabras clave.
+
+3. **Instalar dependencias del frontend**:
+
 ```bash
 npm install
 npm --prefix frontend install
@@ -233,117 +165,110 @@ npm --prefix frontend install
 
 ---
 
-## 🚀 Modos de Ejecución
+## Modos de Ejecución y Verificación
 
-### 1. Inicio Rápido Full-Stack (Recomendado)
-Inicia **simultáneamente** el backend FastAPI (con `uv`) y el frontend Astro con un único comando:
+### Modo Desarrollo (Backend + Frontend con recarga)
+
+Ejecuta simultáneamente FastAPI (`:8000`) y el servidor de desarrollo Astro (`:4321`, con proxy `/api` configurado hacia `:8000` en `frontend/astro.config.mjs`):
 
 ```bash
 npm run dev
 ```
 
-- 🟣 **Frontend Web**: `http://localhost:4321`
-- 🔵 **Backend API**: `http://localhost:8000`
+Abre `http://localhost:4321` en el navegador.
 
-*(Presionar `Ctrl + C` detiene ambos servidores).*
-
----
-
-### 2. Modo Consola (CLI)
-Para ejecutar el análisis directamente en la terminal con tabla `Rich`:
+### Modo CLI (Terminal)
 
 ```bash
-# Ejecución estándar (medios + X, Instagram y Facebook)
-uv run python main.py
-
-# Búsqueda personalizada exportando el informe en Markdown y los datos en JSON
-uv run python main.py --query "UBA medicina" --max-results 6 --output-md reporte.md --output-json noticias.json
+uv run python main.py --query "presupuesto" --max-results 6 --output-md reporte.md --output-json resultados.json
 ```
 
----
+Opciones disponibles en `main.py`:
 
-### 3. Modo Producción (Servidor Único)
-Compila el frontend de Astro en estáticos para que FastAPI sirva tanto la interfaz web como la API desde el puerto `8000`:
+- `--query`: filtro temático sobre la UBA (por defecto `"UBA"`).
+- `--max-results`: cantidad máxima de temas agrupados a analizar (por defecto `5`).
+- `--output-md`: ruta opcional para exportar el informe Markdown.
+- `--output-json`: ruta opcional para exportar la lista JSON de noticias analizadas (`List[AnalyzedNews]`).
+
+### Modo Servidor Único (Local)
+
+Compila la interfaz estática en `frontend/dist/` y sirve frontend + API desde un único proceso FastAPI:
 
 ```bash
 npm run build
- npm start
+npm start
 ```
-Accede en **`http://localhost:8000`**.
+
+Requiere haber ejecutado `npm run build` previamente para que `GET /` sirva la interfaz en `http://localhost:8000` (o `127.0.0.1:8000`). Por defecto `python server.py` enlaza `127.0.0.1:8000` sin `reload`. Para variables de red o CORS en entornos locales personalizados, consulta `HOST`, `PORT`, `UVICORN_RELOAD` y `CORS_ORIGINS` en [server.py](server.py).
+
+### Verificación rápida tras instalar
+
+```bash
+uv run python main.py --help
+curl -s http://localhost:8000/api/config
+```
+
+Con `npm run dev` o `npm start` activos, `/api/config` debe responder HTTP `200` con el estado de claves y plataformas habilitadas.
 
 ---
 
-## 📡 Endpoints de la API Backend y Esquema de Datos
+## API Backend y Esquema de Datos
 
-| Método | Endpoint | Descripción |
-| :--- | :--- | :--- |
-| `GET` | `/api/config` | Devuelve el estado de `GEMINI_API_KEY`, el modelo configurado y el estado de los conectores `mcp_social`. |
-| `GET` | `/api/stream?query=UBA&max_results=6` | **Server-Sent Events (SSE)** con el progreso paso a paso de cada agente y el resultado final. |
-| `POST` | `/api/analyze` | Ejecuta el grafo de forma sincrónica y devuelve el JSON completo con estadísticas, noticias y reporte Markdown. |
-| `GET` | `/` | Sirve la aplicación web compilada. |
+La especificación OpenAPI completa (modelos `ConfigResponse`, `AnalyzeRequest`, `AnalyzeResponse` y `AnalyzedNews`) se genera automáticamente en `/docs` (`/openapi.json`) cuando el backend está en ejecución.
 
-### Ejemplo de objeto de noticia/publicación analizada (`AnalyzedNews`)
+- **`GET /api/config`**: devuelve `{ gemini_configured, gemini_keys_count, gemini_key_status, model, default_query, social_status }`.
+- **`POST /api/analyze`**: recibe `{ "query": "UBA", "max_results": 6 }` (`query` de 1 a 200 caracteres; `max_results` entre `1` y `15`), ejecuta el grafo de forma asíncrona no bloqueante y devuelve `{ query, total, stats, news, summary_report }`.
+- **`GET /api/stream`**: parámetros de query `query` (`1..200` caracteres, defecto `"UBA"`) y `max_results` (`1..15`, defecto `6`). Transmite tramas SSE JSON `{"step", "message", "payload"}` para los eventos `start`, `searcher`, `searcher_done`, `crawler`, `crawler_done`, `classifier`, `classifier_progress`, `completed` y `error`.
+
+Nota sobre rangos por interfaz: la CLI toma por defecto `max_results=5`, el endpoint `/api/analyze` y `/api/stream` aceptan `1..15` (defecto `6`), y el control deslizante del dashboard cubre `3..12` (defecto `6`). La CLI con `--output-json` exporta únicamente el arreglo `AnalyzedNews[]`, mientras que la API y el botón **Exportar JSON** del panel web exportan el objeto completo `{ query, total, stats, news, summary_report }`.
+
+Ejemplo de elemento `AnalyzedNews` dentro de `news`:
+
 ```json
 {
   "url": "https://news.google.com/rss/articles/...",
-  "title": "La UBA marchó para exigir el cumplimiento de la Ley de Financiamiento Universitario",
-  "source": "Clarín",
+  "title": "La UBA fue distinguida en el ranking internacional QS",
+  "source": "Infobae",
   "source_type": "medio",
-  "date": "05/11/2026 04:08",
-  "occurrences": 18,
-  "sources": [
-    "Clarín", "TN", "La Nación", "Perfil", "Ámbito", "Infobae", "Página 12", "Radio Mitre", "A24", "El Destape", "Crónica"
-  ],
+  "date": "06/11/2026 14:30",
+  "occurrences": 2,
+  "sources": ["Infobae", "Clarín"],
   "mentions": [
     {
-      "title": "La UBA marchó para exigir el cumplimiento de la Ley de Financiamiento Universitario",
-      "url": "https://...",
+      "title": "La UBA fue distinguida en el ranking internacional QS",
+      "url": "https://www.infobae.com/educacion/...",
+      "source": "Infobae",
+      "source_type": "medio",
+      "date": "06/11/2026 14:30"
+    },
+    {
+      "title": "Reconocimiento internacional a facultades de la UBA",
+      "url": "https://www.clarin.com/sociedad/...",
       "source": "Clarín",
       "source_type": "medio",
-      "date": "05/11/2026 04:08"
+      "date": "06/11/2026 15:10"
     }
   ],
   "classification": {
-    "sentiment": "MALA",
-    "score": -0.7,
-    "category": "Presupuesto y Finanzas",
+    "sentiment": "BUENA",
+    "score": 0.85,
+    "category": "Logros Académicos y Científicos",
     "key_points": [
-      "Reclamo frente a Tribunales por el cumplimiento de la Ley de Financiamiento Universitario."
+      "Mejora en indicadores de investigación y empleabilidad"
     ],
-    "justification": "Refleja un escenario de conflicto presupuestario e institucional que afecta el funcionamiento de la universidad."
+    "justification": "La cobertura destaca posicionamiento académico e impacto positivo para la institución."
   }
 }
 ```
 
----
-
-## 📊 Criterios de Clasificación
-
-| Clasificación | Score | Definición y Ejemplos |
-| :---: | :---: | :--- |
-| 🟢 **BUENA** | `+0.1` a `+1.0` | Logros científicos, subas en rankings internacionales (QS), premios, subastas solidarias a beneficio del Hospital de Clínicas, nuevos convenios, avances académicos o repercusión positiva en redes sociales. |
-| 🔴 **MALA** | `-1.0` a `-0.1` | Recortes presupuestarios, paros docentes o no docentes, marchas por incumplimiento de financiamiento, deterioro edilicio, conflictos gremiales o tomas. |
-| ⚪ **NEUTRA** | `0.0` | Información administrativa rutinaria, fechas de inscripción al CBC, calendario académico o consultas estudiantiles generales en redes. |
+Valores válidos de `source_type`: `"medio"` o `"red_social"`.
 
 ---
 
-## ❓ Solución de Problemas Frecuentes
+## Criterios de Clasificación
 
-### 1. `OSError: [Errno 98] Address already in use` (puerto 8000 o 4321 ocupado)
-Si una ejecución previa quedó corriendo en segundo plano, libera ambos puertos con:
-```bash
-lsof -ti:8000 -ti:4321 | xargs -r kill -9
-```
+La etiqueta estructurada `classification.sentiment` utiliza únicamente los literales `"BUENA"`, `"MALA"` o `"NEUTRAL"`:
 
-### 2. Falta el navegador Chromium de Playwright
-Si Crawl4AI indica que el ejecutable del navegador no existe:
-```bash
-uv run playwright install chromium
-```
-
-### 3. Sincronizar dependencias tras actualizar el repositorio
-```bash
-uv sync
-npm install
-npm --prefix frontend install
-```
+- **BUENA** (`score` en `[+0.1, +1.0]`): logros científicos, becas, convenios, mejoras presupuestarias o reconocimientos internacionales.
+- **NEUTRAL** (`score` en `(-0.1, +0.1)`): comunicados informativos, fechas de inscripción al Ciclo Básico Común (CBC) o cronogramas sin carga valorativa marcada.
+- **MALA** (`score` en `[-1.0, -0.1]`): conflictos gremiales o paros con pérdida de clases, recortes presupuestarios, crisis edilicias o denuncias institucionales.

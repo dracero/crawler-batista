@@ -1,25 +1,28 @@
 """
-Módulo MCP (Model Context Protocol) para Redes Sociales: X (Twitter), Instagram y Facebook.
+Módulo de búsqueda y normalización temporal para Redes Sociales: X (Twitter), Instagram y Facebook.
 
 Provee:
-1. Herramientas MCP estandarizadas (`search_x_mcp`, `search_instagram_mcp`, `search_facebook_mcp`, `search_all_social_mcp`)
-   que pueden ejecutarse tanto directamente desde el grafo de agentes (LangGraph) como exponerse vía protocolo MCP JSON-RPC/stdio.
-2. Decodificación matemática de fechas exactas desde:
+1. Adaptadores en proceso (`search_x_mcp`, `search_instagram_mcp`, `search_facebook_mcp`,
+   `search_all_social_mcp`) mediante consultas DuckDuckGo (`site:...`).
+2. Decodificación de fechas en zona horaria Argentina (`America/Argentina/Buenos_Aires`) desde:
    - IDs Snowflake de X/Twitter (`/status/<id>`)
-   - Shortcodes Base64URL de Instagram (`/p/<code>/` y `/reel/<code>/`)
+   - Shortcodes Base64URL de Instagram (`/p/<code>/`, `/reel/<code>/`, `/reels/<code>/`)
    - IDs de video de TikTok (`/video/<id>`)
-   - Prefijos de fecha en fragmentos de Facebook, Instagram y X (`Oct 28, 2026`, `3 days ago`, etc.)
-3. Enriquecimiento opcional de tweets de X mediante la API pública de FxTwitter (texto completo, autor, likes, retweets, fecha exacta).
+   - Prefijos de fecha y formatos RFC-2822 / ISO-8601
+3. Enriquecimiento opcional de tweets de X mediante la API pública de FxTwitter.
 """
 
-import os
 import re
 import json
 import logging
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from email.utils import parsedate_to_datetime
 from typing import List, Dict, Any, Optional
+
+AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 from src.state import SearchResult
 
@@ -43,21 +46,21 @@ SPANISH_MONTHS = {
 
 
 def decode_x_snowflake_date(url: str) -> Optional[str]:
-    """Extrae la fecha y hora exacta desde el Snowflake ID de un status de X (Twitter)."""
+    """Extrae fecha y hora (minutos, hora Argentina) desde el Snowflake ID de un status de X."""
     m = re.search(r"status/(\d{15,22})", url or "")
     if not m:
         return None
     try:
         sf = int(m.group(1))
         ts_sec = ((sf >> 22) + 1288834974657) / 1000.0
-        dt = datetime.fromtimestamp(ts_sec, tz=timezone.utc)
+        dt = datetime.fromtimestamp(ts_sec, tz=timezone.utc).astimezone(AR_TZ)
         return dt.strftime("%d/%m/%Y %H:%M")
     except Exception:
         return None
 
 
 def decode_instagram_shortcode_date(url: str) -> Optional[str]:
-    """Decodifica la fecha exacta de publicación desde el shortcode Base64URL de un post o reel de Instagram."""
+    """Decodifica la fecha de publicación desde el shortcode Base64URL de Instagram."""
     m = re.search(r"instagram\.com/(?:[^/]+/)?(?:p|reel|reels)/([A-Za-z0-9_-]{8,14})", url or "")
     if not m:
         return None
@@ -69,50 +72,52 @@ def decode_instagram_shortcode_date(url: str) -> Optional[str]:
                 return None
             media_id = (media_id * 64) + INSTAGRAM_ALPHABET.index(ch)
         ts_ms = (media_id >> 23) + 1314220021721
-        dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc)
+        dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc).astimezone(AR_TZ)
         return dt.strftime("%d/%m/%Y")
     except Exception:
         return None
 
 
 def decode_tiktok_video_date(url: str) -> Optional[str]:
-    """Decodifica la fecha exacta desde el ID de video de TikTok."""
+    """Decodifica la fecha (hora Argentina) desde el ID de video de TikTok."""
     m = re.search(r"video/(\d{15,22})", url or "")
     if not m:
         return None
     try:
         vid_id = int(m.group(1))
         ts_sec = vid_id >> 32
-        dt = datetime.fromtimestamp(ts_sec, tz=timezone.utc)
+        dt = datetime.fromtimestamp(ts_sec, tz=timezone.utc).astimezone(AR_TZ)
         return dt.strftime("%d/%m/%Y %H:%M")
     except Exception:
         return None
 
 
 def parse_snippet_date(snippet: str) -> Optional[str]:
-    """Extrae fechas desde el inicio del texto/snippet (ej: 'Oct 28, 2026 ·', '3 days ago ·', '21 hours ago ·')."""
+    """Extrae fechas relativas o textuales desde el inicio del texto/snippet."""
     if not snippet:
         return None
-    head = snippet[:60].strip()
-    now = datetime.now()
+    head = snippet[:80].strip()
+    now = datetime.now(tz=AR_TZ)
 
-    # Patrón relativo en inglés/español: "3 days ago", "21 hours ago", "hace 2 días"
-    m_rel = re.search(r"(\d+)\s+(hour|hours|day|days|week|weeks|minute|minutes|hora|horas|día|días|dia|dias)\s*(?:ago|atrás)?", head, re.IGNORECASE)
+    # Patrón relativo en inglés/español: "3 days ago", "21 hours ago", "hace 2 días", "hace 3 semanas"
+    m_rel = re.search(
+        r"(\d+)\s+(minute|minutes|minuto|minutos|hour|hours|hora|horas|day|days|día|días|dia|dias|week|weeks|semana|semanas|month|months|mes|meses)\s*(?:ago|atrás)?",
+        head,
+        re.IGNORECASE,
+    )
     if m_rel:
         val = int(m_rel.group(1))
         unit = m_rel.group(2).lower()
+        if "min" in unit:
+            return (now - timedelta(minutes=val)).strftime("%d/%m/%Y %H:%M")
         if "hour" in unit or "hora" in unit:
-            dt = now - timedelta(hours=val)
-            return dt.strftime("%d/%m/%Y %H:%M")
-        elif "day" in unit or "día" in unit or "dia" in unit:
-            dt = now - timedelta(days=val)
-            return dt.strftime("%d/%m/%Y")
-        elif "week" in unit:
-            dt = now - timedelta(weeks=val)
-            return dt.strftime("%d/%m/%Y")
-        elif "min" in unit:
-            dt = now - timedelta(minutes=val)
-            return dt.strftime("%d/%m/%Y %H:%M")
+            return (now - timedelta(hours=val)).strftime("%d/%m/%Y %H:%M")
+        if "day" in unit or "día" in unit or "dia" in unit:
+            return (now - timedelta(days=val)).strftime("%d/%m/%Y")
+        if "week" in unit or "semana" in unit:
+            return (now - timedelta(weeks=val)).strftime("%d/%m/%Y")
+        if "month" in unit or "mes" in unit:
+            return (now - timedelta(days=val * 30)).strftime("%d/%m/%Y")
 
     # Patrón "Oct 28, 2026" o "Mar 25, 2026"
     m_en = re.search(r"\b([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(20\d{2})\b", head)
@@ -137,10 +142,10 @@ def parse_snippet_date(snippet: str) -> Optional[str]:
     return None
 
 
-def extract_and_format_date(raw_date: Optional[str], url: str = "", snippet: str = "") -> str:
+def extract_and_format_date(raw_date: Optional[str], url: str = "", snippet: str = "") -> Optional[str]:
     """
-    Normaliza cualquier fecha de RSS, DuckDuckGo, URL de red social o snippet a formato legible 'DD/MM/YYYY' (o con hora).
-    Garantiza que ninguna noticia o posteo quede sin fecha.
+    Normaliza fechas de RSS, DuckDuckGo, URL de red social o snippet a 'DD/MM/YYYY' (o 'DD/MM/YYYY HH:MM' en hora Argentina).
+    Retorna None si no es posible determinar una fecha real.
     """
     # 1. Intentar decodificación matemática desde URL de X, Instagram o TikTok
     url_date = (
@@ -154,25 +159,27 @@ def extract_and_format_date(raw_date: Optional[str], url: str = "", snippet: str
     # 2. Intentar parsear raw_date (RFC-2822 de RSS o ISO-8601 de DDG)
     if raw_date:
         raw_clean = raw_date.strip()
-        # Si ya está en formato DD/MM/YYYY
         if re.match(r"^\d{2}/\d{2}/\d{4}", raw_clean):
             return raw_clean
         # RFC 2822 (ej: "Fri, 06 Nov 2026 14:23:00 GMT")
         try:
             dt = parsedate_to_datetime(raw_clean)
-            return dt.strftime("%d/%m/%Y %H:%M")
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(AR_TZ).strftime("%d/%m/%Y %H:%M")
         except Exception:
             pass
         # ISO 8601 (ej: "2026-11-06T14:23:00+00:00" o "2026-11-06")
         try:
             iso_part = raw_clean.replace("Z", "+00:00")
             dt = datetime.fromisoformat(iso_part)
-            if dt.hour == 0 and dt.minute == 0:
+            if dt.hour == 0 and dt.minute == 0 and dt.tzinfo is None:
                 return dt.strftime("%d/%m/%Y")
-            return dt.strftime("%d/%m/%Y %H:%M")
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(AR_TZ).strftime("%d/%m/%Y %H:%M")
         except Exception:
             pass
-        # Verificar si contiene fecha tipo "Oct 28, 2026"
         parsed_raw = parse_snippet_date(raw_clean)
         if parsed_raw:
             return parsed_raw
@@ -182,8 +189,7 @@ def extract_and_format_date(raw_date: Optional[str], url: str = "", snippet: str
     if snippet_date:
         return snippet_date
 
-    # 4. Respaldo con fecha de relevamiento actual
-    return datetime.now().strftime("%d/%m/%Y")
+    return None
 
 
 def enrich_x_tweet_via_fxtwitter(url: str) -> Optional[Dict[str, Any]]:
@@ -344,7 +350,7 @@ def search_facebook_mcp(query: str, max_items: int = 4) -> List[SearchResult]:
                     display_title = first_title_part or clean_body[:100]
 
                 m_page = re.search(r"facebook\.com/([A-Za-z0-9_.]+)", href)
-                page_name = m_page.group(1) if m_page and m_page.group(1).lower() not in ("groups", "watch", "share", " events") else ""
+                page_name = m_page.group(1) if m_page and m_page.group(1).lower() not in ("groups", "watch", "share", "events") else ""
                 src_label = f"Facebook ({page_name})" if page_name else "Facebook"
 
                 results.append(SearchResult(
@@ -358,27 +364,31 @@ def search_facebook_mcp(query: str, max_items: int = 4) -> List[SearchResult]:
                 if len(results) >= max_items:
                     break
     except Exception as e:
-        logger.debug(f"Aviso en MCP Facebook: {e}")
+        logger.debug(f"Aviso en búsqueda Facebook: {e}")
     return results
 
 
 def search_all_social_mcp(query: str, max_per_platform: int = 3) -> Dict[str, List[SearchResult]]:
-    """Ejecuta los conectores MCP de X, Instagram y Facebook y devuelve los resultados organizados por plataforma."""
-    return {
-        "x": search_x_mcp(query, max_items=max_per_platform),
-        "instagram": search_instagram_mcp(query, max_items=max_per_platform),
-        "facebook": search_facebook_mcp(query, max_items=max_per_platform),
-    }
+    """Ejecuta en paralelo las búsquedas de X, Instagram y Facebook y organiza resultados por plataforma."""
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        fut_x = executor.submit(search_x_mcp, query, max_per_platform)
+        fut_ig = executor.submit(search_instagram_mcp, query, max_per_platform)
+        fut_fb = executor.submit(search_facebook_mcp, query, max_per_platform)
+        return {
+            "x": fut_x.result(),
+            "instagram": fut_ig.result(),
+            "facebook": fut_fb.result(),
+        }
 
 
 def get_mcp_social_status() -> Dict[str, Any]:
-    """Devuelve el estado de los conectores MCP de Redes Sociales para el endpoint /api/config."""
+    """Devuelve el estado y plataformas consultadas por los conectores sociales para /api/config."""
     return {
         "enabled": True,
-        "platforms": ["X (Twitter)", "Instagram", "Facebook", "TikTok", "YouTube", "Reddit"],
+        "platforms": ["X (Twitter)", "Instagram", "Facebook"],
         "features": [
-            "X/Twitter MCP (Snowflake Date + FxTwitter API)",
-            "Instagram MCP (Posts/Reels + Base64 Shortcode Date)",
-            "Facebook MCP (Publicaciones + Extractor de Fechas)"
+            "X/Twitter (DuckDuckGo + Snowflake Date + FxTwitter API)",
+            "Instagram (DuckDuckGo + Base64 Shortcode Date)",
+            "Facebook (DuckDuckGo + Extractor de Fechas)"
         ]
     }

@@ -3,7 +3,7 @@ interface Props {
   title?: string;
 }
 
-const { title = "Monitor Inteligente UBA - LangGraph & Astro" } = Astro.props;
+const { title = "Monitor de Noticias y Redes Sociales UBA" } = Astro.props;
 ---
 
 <!doctype html>
@@ -12,10 +12,6 @@ const { title = "Monitor Inteligente UBA - LangGraph & Astro" } = Astro.props;
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{title}</title>
-    <!-- Chart.js para gráficos de sentimiento -->
-    <script is:inline src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- Lucide Icons -->
-    <script is:inline src="https://unpkg.com/lucide@latest"></script>
   </head>
   <body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased flex flex-col">
     <slot />
